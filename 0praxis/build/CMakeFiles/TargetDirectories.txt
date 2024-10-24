@@ -1,0 +1,5 @@
+/home/Rechnernetze/0praxis/build/CMakeFiles/hello_world.dir
+/home/Rechnernetze/0praxis/build/CMakeFiles/package.dir
+/home/Rechnernetze/0praxis/build/CMakeFiles/package_source.dir
+/home/Rechnernetze/0praxis/build/CMakeFiles/edit_cache.dir
+/home/Rechnernetze/0praxis/build/CMakeFiles/rebuild_cache.dir
