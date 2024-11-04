@@ -1,0 +1,5 @@
+/home/Rechnernetze/1praxis/build/CMakeFiles/webserver.dir
+/home/Rechnernetze/1praxis/build/CMakeFiles/package.dir
+/home/Rechnernetze/1praxis/build/CMakeFiles/package_source.dir
+/home/Rechnernetze/1praxis/build/CMakeFiles/edit_cache.dir
+/home/Rechnernetze/1praxis/build/CMakeFiles/rebuild_cache.dir

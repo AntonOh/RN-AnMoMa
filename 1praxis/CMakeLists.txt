@@ -2,6 +2,8 @@ cmake_minimum_required (VERSION 3.5)
 project (RN-Praxis)
 set (CMAKE_C_STANDARD 11)
 
+add_executable(webserver webserver.c)
+
 # Packaging
 set(CPACK_SOURCE_GENERATOR "TGZ")
 set(CPACK_SOURCE_IGNORE_FILES
