@@ -7,6 +7,7 @@
 #include <signal.h>
 
 #define MAX_MEM_SIZE 8192
+#define CON_LIMIT 20
 
 void zombie_handler() {
   // We could save errno but i dont care
@@ -15,7 +16,7 @@ void zombie_handler() {
 
 void con_handler(int client_fd, void* accept_pack_mem, size_t mem_size) {
   for(;;) {
-    size_t n = recv(client_fd, accept_pack_mem, 8191, 0);  
+    //size_t n = recv(client_fd, accept_pack_mem, 8191, 0);  
 
     if (recv(client_fd, accept_pack_mem, mem_size, 0) == -1 ) {
       printf("Error recv");
@@ -61,7 +62,7 @@ int main(int argc, char *argv[]) {
     return -1;
   }
 
-  if (listen(fd, 20) == -1) {
+  if (listen(fd, CON_LIMIT) == -1) {
     printf("could not listen on port\n");
     return -1;
   }
