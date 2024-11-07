@@ -14,7 +14,9 @@
 
 enum REQ_TYPES {
   GET,
-  POST,
+  HEAD,
+  PUT,
+  DELETE,
   UNK
 } typedef reqtype_t;
 
@@ -47,17 +49,111 @@ struct stream_buffer {
 } typedef stream_buffer_t;
 
 
+struct static_pair {
+  char *path;
+  char *content; 
+} typedef pair_t;
+
+struct dynamic_array {
+  pair_t *array;
+  size_t size;
+  size_t used;
+} typedef pair_vector_t;
+
 void zombie_handler() {
   // We could save errno but i dont care
   while (waitpid(-1, NULL, WNOHANG) > 0);
 }
-
+/*
 size_t get_line_idx(char mem[], size_t mem_size) {
   for (size_t i = 0; i < mem_size-1; i++) {
     if (mem[i] == '\r' && mem[i+1] == '\n') {
       return i;
     }
   }
+}*/
+
+
+void dynamic_init(pair_vector_t* pairs) {
+  pairs->array = NULL;
+  pairs->size = 0;
+  pairs->used = 0;
+}
+
+int dynamic_add(pair_vector_t* pairs, pair_t pair) {
+  if (pairs->size == 0) {
+    pairs->size = 4;
+    //pairs->array = (pair_t *)calloc(sizeof(pair_t) * pairs->size);
+    pairs->array = (pair_t *)calloc(4, sizeof(pair_t));    // already start out with bunch of memory
+  }
+
+  // check if space is free
+  if (pairs->used == pairs->size) {
+    pairs->array = (pair_t *)reallocarray(pairs->array, pairs->size * 2, sizeof(pair_t));    
+
+    memset(pairs->array + pairs->size * sizeof(pair_t), 0x0, sizeof(pair_t) * pairs->size);
+
+    pairs->size *= 2;
+  }
+
+  // find free
+  for (int i = 0; i < pairs->size; i++ ) {
+    if (pairs->array[i].path == NULL && pairs->array[i].content == NULL) {
+      pairs->array[i].path = pair.path;
+      pairs->array[i].content = pair.content;
+      pairs->used += 1;
+      return 1;
+    }
+  }
+  return -1;
+}
+
+int dynamic_remove(pair_vector_t* pairs, int idx) {
+  if (pairs->array[idx].path == NULL) {
+    return 0;
+  }
+
+  free(pairs->array[idx].path);
+  free(pairs->array[idx].content);
+
+  pairs->array[idx].path = NULL;
+  pairs->array[idx].content = NULL;
+  pairs->used -= 1;
+  return 1;
+}
+
+// I'm sure there is a c function to compare until delimiter but i'm just implementing it myself
+int cmpdelim(char *haystack, char *needle, char delim) {
+  int idx = 0;
+
+  while (needle[idx] != '\x00') {
+    printf("delim: %c %c\n", haystack[idx], needle[idx]);
+    if (haystack[idx] != needle[idx]) {
+      return 0;
+    } 
+    idx++;
+  }
+  if (haystack[idx] != delim) {
+    return 0;
+  }
+  return 1;
+}
+
+int dynamic_find(pair_vector_t* pairs, char *path, char delim) {
+  int ret = pairs->size;
+  printf("returning %d\n", ret);
+
+  int idx = 0;
+  while (idx < pairs->size) {
+    if (pairs->array[idx].path != 0x0) {
+      if (cmpdelim(path, pairs->array[idx].path, delim) == 1) {
+        break;
+      }
+    }
+    idx++;
+  }
+  printf("Here %d\n", idx);
+  return idx; 
 }
 
 void  flush_buffer(stream_buffer_t* buffer) {
@@ -104,40 +200,53 @@ void push_to_buffer(stream_buffer_t* buffer, char* message, size_t n) {
   }
 }
 
-void set_type(req_t* request) {
+void set_type(req_t* request) { 
+  if (cmpdelim(request->req_line, "GET", ' ') == 1) {
+    request->type = GET;
+  } else if (cmpdelim(request->req_line, "PUT", ' ')) {
+    request->type = PUT;
+  } else if (cmpdelim(request->req_line, "DELTE", ' ')) {
+    request->type = DELETE;
+  } else if (cmpdelim(request->req_line, "HEAD", ' ')) {
+    request->type = HEAD;
+  } else {
+    request->type = UNK;
+  }
+  /*
   if (strncmp(request->req_line, "GET", 3) == 0) {
     request->type = GET;
-  } 
+  } if (strncmp(request->req_line, "GET", 3) == 0) {*/
 }
 
  
-bool check_valid(req_t* request) {
-  regex_t regex;
-  int reti;
+bool check_valid(req_t* request, regex_t* reqline_regex, regex_t* headers_regex) {
+  //regex_t regex;
+  //int reti;
 
-  char *req_line_pattern = "^(GET|POST|PUT|DELETE|HEAD) ([^ \t\n\v\f\r]+) HTTP/[0-9].[0-9]\r\n$";
-  char *headers_pattern = "^([^ \t\n\v\f\r]+: [^ \t\n\v\f\r]+\r\n)+\r\n$";
+  //char *req_line_pattern = "^(GET|HEAD) ([^ \t\n\v\f\r]+) HTTP/[0-9].[0-9]\r\n$";
+  //char *headers_pattern = "^([^ \t\n\v\f\r]+: [^ \t\n\v\f\r]+\r\n)+\r\n$";
 
   // check regex
-  int req_line_regex = regcomp(&regex, req_line_pattern, REG_EXTENDED);
-  if (req_line_regex) {
-    printf("could not compile regex\n");
-    return false;
-  }  
+  //int req_line_regex = regcomp(&regex, req_line_pattern, REG_EXTENDED);
+  //if (req_line_regex) {
+  //  printf("could not compile regex\n");
+  //  return false;
+  //}  
 
-  if (regexec(&regex, request->req_line, 0, NULL, 0) != 0) {
+  if (regexec(reqline_regex, request->req_line, 0, NULL, 0) != 0) {
+    printf("failed req_line\n");
     return false;
   }
 
-  int headers_regex = regcomp(&regex, headers_pattern, REG_EXTENDED);
-  if (headers_regex) {
-    printf("could not compile regex\n");
-    return false;
-  }  
+  //int headers_regex = regcomp(&regex, headers_pattern, REG_EXTENDED);
+  //if (headers_regex) {
+  //  printf("could not compile regex\n");
+  //  return false;
+  ///}  
 
 
-  if ((regexec(&regex, request->headers, 0, NULL, 0) != 0) && request->headers_size > 2) {
-    printf("Here\n");
+  if ((regexec(headers_regex, request->headers, 0, NULL, 0) != 0) && request->headers_size > 2) {
+    printf("failed headers\n");
     return false;
   } 
 
@@ -210,20 +319,19 @@ int pull_from_buffer(stream_buffer_t* buffer, req_t* http_request) {
   bytes_read += req_line_size;
 
   // load into memory
-  req_line_content = (char *)malloc(req_line_size); 
+  req_line_content = (char *)calloc(req_line_size + 1, sizeof(char)); 
 
-  memcpy(req_line_content, req_line_start, req_line_size);
+  strncpy(req_line_content, req_line_start, req_line_size);
 
 
   // read header
   header_start = req_line_start + req_line_size;
   header_size = ((header_end + 4) - (req_line_end + 2));
 
-  printf("header_size: %d\n", header_size);
 
-  header_content = (char *)malloc(header_size);
+  header_content = (char *)calloc(header_size + 1, sizeof(char));
 
-  memcpy(header_content, header_start, header_size);
+  strncpy(header_content, header_start, header_size);
 
   bytes_read += header_size;
 
@@ -243,7 +351,7 @@ int pull_from_buffer(stream_buffer_t* buffer, req_t* http_request) {
         return 0;
       } else {
         payload_content = (char *)malloc(payload_size);
-        memcpy(payload_content, header_start + header_size + 2, payload_size); 
+        strncpy(payload_content, header_start + header_size + 2, payload_size); 
 
         bytes_read += payload_size;
       }
@@ -268,49 +376,50 @@ int pull_from_buffer(stream_buffer_t* buffer, req_t* http_request) {
 }
 
 size_t pack_response(resp_t* response) {
+  printf("hi from pack\n");
   response->pack_size = 0;
 
   if (response->value == 404) {
-    response->pack_size += 24;
-    response->pack = (char *)malloc(response->pack_size);
-    memcpy(response->pack, "HTTP/1.1 404 Not Found\r\n", 24);
+    response->pack = strdup("HTTP/1.1 404 Not Found\r\n\r\n\x00");
+    response->pack_size += strlen(response->pack);
+  } else if (response->value == 200) {
+    response->pack = strdup("HTTP/1.1 200 Ok\r\n\r\n\x00");
+    response->pack_size += strlen(response->pack);
   } else if (response->value == 400) {
-    response->pack_size += 26;
-    response->pack = (char *)malloc(response->pack_size);
-    memcpy(response->pack, "HTTP/1.1 400 Bad Request\r\n", 26);
+    response->pack = strdup("HTTP/1.1 400 Bad Request\r\n\r\n\x00");
+    response->pack_size += strlen(response->pack);
   } else {
-    response->pack_size += 30;
-    response->pack = (char *)malloc(response->pack_size);
-    memcpy(response->pack, "HTTP/1.1 501 Not Implemented\r\n", 30);
+    response->pack = strdup("HTTP/1.1 501 Not Implemented\r\n\r\n\x00");
+    response->pack_size += strlen(response->pack);
+
   }
 
+  printf("RESP: %s\n", response->pack);
+ 
   if (response->payload_size != 0) {
     // convert size to string
     char buffer[20];
     memset(buffer, 0x0, 20);
-    sprintf(buffer, "%d", response->payload_size);
+    sprintf(buffer, "%ld", response->payload_size);
 
     size_t size_str_len = strlen(buffer);
 
-    response->pack = (char *)realloc(response->pack, response->pack_size + 16 + size_str_len + 4 + response->payload_size);
+    response->pack = (char *)realloc(response->pack, response->pack_size - 2 + 16 + size_str_len + 4 + response->payload_size + 1);
 
     // construct package
-    strncpy(response->pack + response->pack_size, "Content-Length: ", 16);
-    response->pack_size += 16;
+    strcpy(response->pack + response->pack_size - 2, "Content-Length: \x00");
+    response->pack_size += 16-2;
 
-    strncpy(response->pack + response->pack_size, buffer, size_str_len);
+    strcpy(response->pack + response->pack_size, buffer);
     response->pack_size += size_str_len;
 
-    strncpy(response->pack + response->pack_size, "\r\n\r\n", 4);
+    strcpy(response->pack + response->pack_size, "\r\n\r\n\x00");
     response->pack_size += 4;
 
-    strncpy(response->pack + response->pack_size, response->payload, response->payload_size);
+    strcpy(response->pack + response->pack_size, response->payload);
     response->pack_size += response->payload_size;
   } else {
-    response->pack = (char *)realloc(response->pack, response->pack_size + 2);
-    strncpy(response->pack + response->pack_size, "\r\n", 2);
-
-    response->pack_size += 2;
+    return response->pack_size;
   }
 
   return response->pack_size;
@@ -318,9 +427,9 @@ size_t pack_response(resp_t* response) {
 
 void flush_response(resp_t* response) {
   response->value = 400;
-  if (response->payload != NULL) {
-    free(response->payload);
-  }
+  //if (response->payload != NULL) {
+  //  free(response->payload);
+  //}
   
   response->payload = NULL;
   response->payload_size = 0;
@@ -348,8 +457,52 @@ void con_handler(int client_fd, void* accept_pack_mem, const size_t mem_size) {
   current_request.headers = NULL;
   current_request.payload = NULL;
 
+  response.payload = NULL;
+  response.pack = NULL;
+
   flush_request(&current_request);
   flush_buffer(&buffer);
+
+  //static_pair_t static_pairs[] = { {"/static/foo\x00", "Foo\x00"}, {"/static/bar\x00", "Bar\x00"}, {"/static/baz\x00", "Baz\x00"} };
+  //size_t static_paths_size = 3;
+  
+
+
+  pair_vector_t pairs;
+
+  dynamic_init(&pairs);
+
+  // add static pairs to vector
+  pair_t last_pair;
+  last_pair.path = strdup("/static/foo");
+  last_pair.content = strdup("Foo");
+  printf("heap_addr %p", last_pair.path);
+  dynamic_add(&pairs, last_pair);
+
+  last_pair.path = strdup("/static/bar\x00");
+  last_pair.content = strdup("Bar\x00");
+  dynamic_add(&pairs, last_pair);
+
+  last_pair.path = strdup("/static/baz\x00");
+  last_pair.content = strdup("Baz\x00");
+  dynamic_add(&pairs, last_pair);
+
+  printf("check: %s\n", pairs.array[0].path);
+
+  // setup REGEX to check correctnes of packages
+  regex_t reqline_regex;
+  regex_t headers_regex;
+  char *req_line_pattern = "^(GET|HEAD|PUT|DELETE) ([^ \t\n\v\f\r]+) HTTP/[0-9].[0-9]\r\n$";
+  char *headers_pattern = "^([^ \t\n\v\f\r]+: [^ \t\n\v\f\r]+\r\n)+\r\n$";
+
+  // check regex
+  if (regcomp(&reqline_regex, req_line_pattern, REG_EXTENDED)) {
+    printf("could not compile regex\n");
+  }
+  
+  if (regcomp(&headers_regex, headers_pattern, REG_EXTENDED)) {
+    printf("could not compile regex\n");
+  }  
 
   for(;;) {
     memset(accept_pack_mem, 0x0, mem_size);
@@ -360,33 +513,54 @@ void con_handler(int client_fd, void* accept_pack_mem, const size_t mem_size) {
 
     push_to_buffer(&buffer, accept_pack_mem, mem_size); 
     bool pull_packages = true;
-    while (pull_packages) {
-      int n = pull_from_buffer(&buffer, &current_request);
+    while (pull_from_buffer(&buffer, &current_request) > 0) {
+      //int n = pull_from_buffer(&buffer, &current_request);
 
-      if (n > 0) {
         print_request(&current_request);
+        printf("\n\n");
         flush_response(&response);
 
-        bool is_valid = check_valid(&current_request);
+        bool is_valid = check_valid(&current_request, &reqline_regex, &headers_regex);
         if (is_valid) {
           printf("The Package is valid\n"); 
 
           set_type(&current_request);
 
           if (current_request.type == GET) {
+
             response.value = 404;
+            int idx = dynamic_find(&pairs, current_request.req_line + 4, ' ');
+            if (idx < pairs.size) {
+              printf("Found\n");
+              response.value = 200;
+
+              response.payload = strdup(pairs.array[idx].content);
+              response.payload_size = strlen(pairs.array[idx].content);
+            }
+            printf("value: %d\n", response.value);
+            /*for (size_t i = 0; i < 3; i++) {
+              if (strncmp(current_request.req_line + 4,  static_pairs[i].path, 11) == 0 ){
+                response.value = 200;
+                char *content = (char *)malloc(3);
+
+                content[0] = static_pairs[i].content[0];
+                content[1] = static_pairs[i].content[1];
+                content[2] = static_pairs[i].content[2];
+
+                response.payload = content;
+                response.payload_size = 3;
+                printf("Requested %s", static_pairs[i].path);
+              }
+            } */ 
           } else {
             response.value = 501;
           }
         } 
-
+      
+        printf("calling: pack\n");
         size_t n = pack_response(&response);
         send(client_fd, response.pack, n, 0);
-      } else {
-        pull_packages = false;
       }
-    }
-
   }
   close(client_fd);
   exit(0);
