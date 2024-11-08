@@ -21,6 +21,17 @@ enum REQ_TYPES {
   UNK
 } typedef reqtype_t;
 
+struct static_pair {
+  char *path;
+  char *content; 
+} typedef pair_t;
+
+struct dynamic_array {
+  pair_t *array;
+  size_t size;
+  size_t used;
+} typedef pair_vector_t;
+
 struct http_req {
   reqtype_t type;
 
@@ -50,89 +61,23 @@ struct stream_buffer {
 } typedef stream_buffer_t;
 
 
-struct static_pair {
-  char *path;
-  char *content; 
-} typedef pair_t;
+struct args_struct {
+  int sock;
+  pair_vector_t* pairs;
+  regex_t reqline_regex;
+  regex_t headers_regex;
+} typedef args_t;
 
-struct dynamic_array {
-  pair_t *array;
-  size_t size;
-  size_t used;
-} typedef pair_vector_t;
 
 void zombie_handler() {
   // We could save errno but i dont care
   while (waitpid(-1, NULL, WNOHANG) > 0);
 }
-/*
-size_t get_line_idx(char mem[], size_t mem_size) {
-  for (size_t i = 0; i < mem_size-1; i++) {
-    if (mem[i] == '\r' && mem[i+1] == '\n') {
-      return i;
-    }
-  }
-}*/
 
+/////////////////////////////
+// Some functions for string processing
+/////////////////////////////
 
-void dynamic_init(pair_vector_t* pairs) {
-  pairs->array = NULL;
-  pairs->size = 0;
-  pairs->used = 0;
-}
-
-int dynamic_add(pair_vector_t* pairs, pair_t pair) {
-  if (pairs->size == 0) {
-    pairs->size = 20;
-    //pairs->array = (pair_t *)calloc(sizeof(pair_t) * pairs->size);
-    pairs->array = (pair_t *)calloc(20, sizeof(pair_t));    // already start out with bunch of memory
-  }
-
-   printf("=====prev=======\n");
-   printf("%d\n", pairs->used);
-   printf("%d\n", pairs->size);
-   printf("===============\n");
-
-  // check if space is free
-  if (pairs->used == pairs->size) {
-    pairs->array = (pair_t *)reallocarray(pairs->array, pairs->size * 2, sizeof(pair_t));    
-
-    memset(pairs->array + pairs->size * sizeof(pair_t), 0x0, sizeof(pair_t) * pairs->size);
-
-    pairs->size *= 2;
-  }
-
-  pairs->used++;
-  // find free
-  for (int i = 0; i < pairs->size; i++ ) {
-    if (pairs->array[i].path == NULL && pairs->array[i].content == NULL) {
-      pairs->array[i].path = pair.path;
-      pairs->array[i].content = pair.content;
-
-      printf("======post=====\n");
-      printf("%d\n", pairs->used);
-      printf("%d\n", pairs->size);
-      printf("===============\n");
-      return 1;
-    }
-  }
-
-  return -1;
-}
-
-int dynamic_remove(pair_vector_t* pairs, int idx) {
-  if (pairs->array[idx].path == NULL) {
-    return 0;
-  }
-
-  free(pairs->array[idx].path);
-  free(pairs->array[idx].content);
-
-  pairs->array[idx].path = NULL;
-  pairs->array[idx].content = NULL;
-  pairs->used -= 1;
-  return 1;
-}
 
 // I'm sure there is a c function to compare until delimiter but i'm just implementing it myself
 int cmpdelim(char *haystack, char *needle, char delim) {
@@ -163,6 +108,59 @@ char* strdelim(char* str, char delim) {
   return ret;
 }
 
+///////////////////////////
+// DYNAMIC ARRAY FUNCTIONS
+///////////////////////////
+void dynamic_init(pair_vector_t* pairs) {
+  pairs->array = NULL;
+  pairs->size = 0;
+  pairs->used = 0;
+}
+
+int dynamic_add(pair_vector_t* pairs, pair_t pair) {
+  if (pairs->size == 0) {
+    pairs->size = 20;
+    //pairs->array = (pair_t *)calloc(sizeof(pair_t) * pairs->size);
+    pairs->array = (pair_t *)calloc(20, sizeof(pair_t));    // already start out with bunch of memory
+  }
+
+  // check if space is free
+  if (pairs->used == pairs->size) {
+    pairs->array = (pair_t *)reallocarray(pairs->array, pairs->size * 2, sizeof(pair_t));    
+
+    memset(pairs->array + pairs->size * sizeof(pair_t), 0x0, sizeof(pair_t) * pairs->size);
+
+    pairs->size *= 2;
+  }
+
+  pairs->used++;
+  // find free
+  for (int i = 0; i < pairs->size; i++ ) {
+    if (pairs->array[i].path == NULL && pairs->array[i].content == NULL) {
+      pairs->array[i].path = pair.path;
+      pairs->array[i].content = pair.content;
+
+      return 1;
+    }
+  }
+
+  return -1;
+}
+
+int dynamic_remove(pair_vector_t* pairs, int idx) {
+  if (pairs->array[idx].path == NULL) {
+    return 0;
+  }
+
+  free(pairs->array[idx].path);
+  free(pairs->array[idx].content);
+
+  pairs->array[idx].path = NULL;
+  pairs->array[idx].content = NULL;
+  pairs->used -= 1;
+  return 1;
+}
+
 int dynamic_find(pair_vector_t* pairs, char *path, char delim) {
   int ret = pairs->size;
 
@@ -178,6 +176,26 @@ int dynamic_find(pair_vector_t* pairs, char *path, char delim) {
 
 
   return idx; 
+}
+
+////////////////////////////////
+// init and flush functions
+////////////////////////////////
+void init_buffer(stream_buffer_t *buffer) {
+  buffer->buffer = (char*)malloc(MAX_MEM_SIZE*2 + 80); // enough memory
+  buffer->size = MAX_MEM_SIZE*2 + 80;
+  buffer->tail = 0;
+}
+
+void init_request(req_t *request) {
+  request->req_line = NULL;
+  request->headers = NULL;
+  request->payload = NULL;
+}
+
+void init_response(resp_t *response) {
+  response->payload = NULL;
+  response->pack = NULL;
 }
 
 void  flush_buffer(stream_buffer_t* buffer) {
@@ -204,6 +222,23 @@ void flush_request(req_t* request) {
   request->req_line_size = 0; 
   request->headers_size = 0; 
   request->headers_size = 0; 
+}
+
+void flush_response(resp_t* response) {
+  response->value = 400;
+  if (response->payload != NULL) {
+    free(response->payload);
+  }
+  
+  response->payload = NULL;
+  response->payload_size = 0;
+
+  if (response->pack != NULL) {
+    free(response->pack);
+  }
+
+  response->pack = NULL;
+  response->pack_size = 0;
 }
 
 void push_to_buffer(stream_buffer_t* buffer, char* message, size_t n) {
@@ -236,10 +271,6 @@ void set_type(req_t* request) {
   } else {
     request->type = UNK;
   }
-  /*
-  if (strncmp(request->req_line, "GET", 3) == 0) {
-    request->type = GET;
-  } if (strncmp(request->req_line, "GET", 3) == 0) {*/
 }
 
  
@@ -366,8 +397,7 @@ int pull_from_buffer(stream_buffer_t* buffer, req_t* http_request) {
 
         return 0;
       } else {
-        payload_content = (char *)malloc(payload_size + 1);
-        memset(payload_content, 0x0, payload_size + 1);
+        payload_content = (char *)calloc(payload_size + 1, sizeof(char));
 
         strncpy(payload_content, header_start + header_size, payload_size); 
 
@@ -396,95 +426,37 @@ int pull_from_buffer(stream_buffer_t* buffer, req_t* http_request) {
 size_t pack_response(resp_t* response) {
   response->pack_size = 0;
 
-  if (response->value == 404) {
-    response->pack = strdup("HTTP/1.1 404 Not Found\r\n\r\n\x00");
-    response->pack_size += strlen(response->pack);
-  } else if (response->value == 403) {
-    response->pack = strdup("HTTP/1.1 403 Forbidden\r\n\r\n\x00");
-    response->pack_size += strlen(response->pack);
+  response->pack = (char *)calloc(MAX_MEM_SIZE, sizeof(char));
+  
+  if (response->payload == NULL) {
+    response->payload = strdup("");
+  }
+
+  if (response->value == 200) {
+    sprintf(response->pack, "HTTP/1.1 200 Ok\r\nContent-Length: %d\r\n\r\n%s\x00", response->payload_size, response->payload);
   } else if (response->value == 201) {
-    response->pack = strdup("HTTP/1.1 201 Created\r\n\r\n\x00");
-    response->pack_size += strlen(response->pack);
+    sprintf(response->pack, "HTTP/1.1 201 Created\r\nContent-Length: %d\r\n\r\n%s\x00", response->payload_size, response->payload);
   } else if (response->value == 204) {
-    response->pack = strdup("HTTP/1.1 204 No Content\r\n\r\n\x00");
-    response->pack_size += strlen(response->pack);
-  } else if (response->value == 200) {
-    response->pack = strdup("HTTP/1.1 200 Ok\r\n\r\n\x00");
-    response->pack_size += strlen(response->pack);
+    sprintf(response->pack, "HTTP/1.1 204 No Content\r\nContent-Length: %d\r\n\r\n%s\x00", response->payload_size, response->payload);
   } else if (response->value == 400) {
-    response->pack = strdup("HTTP/1.1 400 Bad Request\r\n\r\n\x00");
-    response->pack_size += strlen(response->pack);
+    sprintf(response->pack, "HTTP/1.1 400 Bad Request\r\nContent-Length: %d\r\n\r\n%s\x00", response->payload_size, response->payload);
+  } else if (response->value == 403) {
+    sprintf(response->pack, "HTTP/1.1 403 Forbidden\r\nContent-Length: %d\r\n\r\n%s\x00", response->payload_size, response->payload);
+  } else if (response->value == 404) {
+    sprintf(response->pack, "HTTP/1.1 404 Not Found\r\nContent-Length: %d\r\n\r\n%s\x00", response->payload_size, response->payload);
   } else {
-    response->pack = strdup("HTTP/1.1 501 Not Implemented\r\n\r\n\x00");
-    response->pack_size += strlen(response->pack);
-
+    sprintf(response->pack, "HTTP/1.1 501 Not Implemented\r\nContent-Length: %d\r\n\r\n%s\x00", response->payload_size, response->payload);
   }
 
-  char buffer[20];
-  memset(buffer, 0x0, 20);
-  sprintf(buffer, "%ld", response->payload_size);
-
-  size_t size_str_len = strlen(buffer);
-
-  response->pack = (char *)realloc(response->pack, response->pack_size - 2 + 16 + size_str_len + 4 + response->payload_size + 1);
-
-  // construct package
-  strcpy(response->pack + response->pack_size - 2, "Content-Length: \x00");
-  response->pack_size += 16-2;
-
-  strcpy(response->pack + response->pack_size, buffer);
-  response->pack_size += size_str_len;
-
-  strcpy(response->pack + response->pack_size, "\r\n\r\n\x00");
-  response->pack_size += 4;
-  if (response->payload_size > 0) {
-    strcpy(response->pack + response->pack_size, response->payload);
-    response->pack_size += response->payload_size;
+  if (response->payload != NULL && response->payload_size == 0) {
+    free(response->payload);
+    response->payload = NULL;
   }
+
+  response->pack_size = strlen(response->pack);
 
   return response->pack_size;
 }
-
-void flush_response(resp_t* response) {
-  response->value = 400;
-  if (response->payload != NULL) {
-    free(response->payload);
-  }
-  
-  response->payload = NULL;
-  response->payload_size = 0;
-
-  if (response->pack != NULL) {
-    free(response->pack);
-  }
-
-  response->pack = NULL;
-  response->pack_size = 0;
-}
-
-void init_buffer(stream_buffer_t *buffer) {
-  buffer->buffer = (char*)malloc(MAX_MEM_SIZE*2 + 80); // enough memory
-  buffer->size = MAX_MEM_SIZE*2 + 80;
-  buffer->tail = 0;
-}
-
-void init_request(req_t *request) {
-  request->req_line = NULL;
-  request->headers = NULL;
-  request->payload = NULL;
-}
-
-void init_response(resp_t *response) {
-  response->payload = NULL;
-  response->pack = NULL;
-}
-
-struct args_struct {
-  int sock;
-  pair_vector_t* pairs;
-  regex_t reqline_regex;
-  regex_t headers_regex;
-} typedef args_t;
 
 //void con_handler(void* client_fd_ptr, void* accept_pack_mem, const size_t mem_size, pair_vector_t *pair) {
 void *con_handler(void* arguments) {
@@ -509,7 +481,6 @@ void *con_handler(void* arguments) {
 
   flush_buffer(&buffer);
 
-
   memset(accept_pack_mem, 0x0, MAX_MEM_SIZE);
   while (recv(client_fd, accept_pack_mem, MAX_MEM_SIZE, 0) > 0) {
     push_to_buffer(&buffer, accept_pack_mem, MAX_MEM_SIZE); 
@@ -518,71 +489,71 @@ void *con_handler(void* arguments) {
     memset(accept_pack_mem, 0x0, MAX_MEM_SIZE);
 
     while (pull_from_buffer(&buffer, &current_request) > 0) {
-        flush_response(&response);
+      flush_response(&response);
 
-        bool is_valid = check_valid(&current_request, &reqline_regex, &headers_regex);
-        if (is_valid) {
-          set_type(&current_request);
+      bool is_valid = check_valid(&current_request, &reqline_regex, &headers_regex);
+      if (is_valid) {
+        set_type(&current_request);
 
 
-          if (current_request.type == GET) {
+        if (current_request.type == GET) {
 
-            response.value = 404;
-            int idx = dynamic_find(pairs, current_request.req_line + 4, ' ');
+          response.value = 404;
+          int idx = dynamic_find(pairs, current_request.req_line + 4, ' ');
+          if (idx < pairs->size) {
+            response.value = 200;
+
+            response.payload = strdup(pairs->array[idx].content);
+            response.payload_size = strlen(pairs->array[idx].content);
+          }
+
+        } else if (current_request.type == PUT) {
+          if (cmpdelim(current_request.req_line + 4, "/dynamic\x00", '/')) {
+            response.value = 204;
+
+
+            int idx = dynamic_find(pairs,  current_request.req_line + 4, ' ');
             if (idx < pairs->size) {
-              response.value = 200;
 
-              response.payload = strdup(pairs->array[idx].content);
-              response.payload_size = strlen(pairs->array[idx].content);
+              free(pairs->array[idx].content);
+              pairs->array[idx].content = strdup(current_request.payload);
+            } else { 
+              response.value = 201;
+
+              pair_t pair_to_add;
+
+              pair_to_add.content = strdup(current_request.payload);
+              pair_to_add.path = strdelim(current_request.req_line + 4, ' ');
+              dynamic_add(pairs, pair_to_add); 
             }
+          } else {
+            response.value = 403;
+          }
 
-          } else if (current_request.type == PUT) {
-            if (cmpdelim(current_request.req_line + 4, "/dynamic\x00", '/')) {
+        } else if (current_request.type == DELETE) {
+          if (cmpdelim(current_request.req_line + 7, "/dynamic\x00", '/')) {
+            response.value = 404;
+
+            int idx = dynamic_find(pairs, current_request.req_line + 7, ' ');
+            if (idx < pairs->size) {
               response.value = 204;
 
-
-              int idx = dynamic_find(pairs,  current_request.req_line + 4, ' ');
-              if (idx < pairs->size) {
-
-                free(pairs->array[idx].content);
-                pairs->array[idx].content = strdup(current_request.payload);
-              } else { 
-                response.value = 201;
-
-                pair_t pair_to_add;
-
-                pair_to_add.content = strdup(current_request.payload);
-                pair_to_add.path = strdelim(current_request.req_line + 4, ' ');
-                dynamic_add(pairs, pair_to_add); 
-              }
-            } else {
-              response.value = 403;
+              dynamic_remove(pairs, idx); 
             }
-
-          } else if (current_request.type == DELETE) {
-            if (cmpdelim(current_request.req_line + 7, "/dynamic\x00", '/')) {
-              response.value = 404;
- 
-              int idx = dynamic_find(pairs, current_request.req_line + 7, ' ');
-              if (idx < pairs->size) {
-                response.value = 204;
-
-                dynamic_remove(pairs, idx); 
-              }
-            } else {
-              response.value = 403;
-            }
-
           } else {
-            response.value = 501;
+            response.value = 403;
           }
+
+        } else {
+          response.value = 501;
         }
+      }
  
       
-        size_t n = pack_response(&response);
-        send(client_fd, response.pack, n, 0);
-        flush_request(&current_request);
-      }
+      size_t n = pack_response(&response);
+      send(client_fd, response.pack, n, 0);
+      flush_request(&current_request);
+    }
   }
 }
 
