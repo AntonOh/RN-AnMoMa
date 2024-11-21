@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -38,11 +39,11 @@ static struct sockaddr_in derive_sockaddr(const char* host, const char* port) {
 
 int main(int argc, char *argv[]) {
     int s;
-    int l_r_s;
+    int io_s;
     struct sockaddr_storage accept_adr;
     socklen_t len_accept_adr;
     char* reply;
-    char* rec_buf[8];
+    char rec_buf[20];
 
     struct sockaddr_in result = derive_sockaddr(argv[1], argv[2]); // creates hints-struct and does getaddrinfo
 
@@ -55,10 +56,26 @@ int main(int argc, char *argv[]) {
     listen(s,5);
     
     len_accept_adr = sizeof(accept_adr);
-    l_r_s = accept(s, (struct sockaddr *)&accept_adr, &len_accept_adr);
+    io_s = accept(s, (struct sockaddr *)&accept_adr, &len_accept_adr);
 
-    reply = "Reply";
-    recv(l_r_s, rec_buf, sizeof(*rec_buf), 0);
-    send(l_r_s, reply, sizeof(*reply), 0);
+    recv(io_s, rec_buf, sizeof(*rec_buf), 0);
+
+    char* message_pointer = strstr(rec_buf, "/ HTTP/");
+    if (message_pointer > rec_buf+3) { //3 is an arbitrary value that should account for methods in front of "/ HTTP/"
+        for (int i = 0; i<3; i++) {
+            message_pointer = strstr(message_pointer, "\r\n"); //I should check strstr behavior when Haystack == NULL
+        }
+    }
+    if (message_pointer!=NULL) {
+            reply= "Reply\r\n\r\n";
+    }
+    else {
+        reply = "Reply";
+    }
+    send(io_s, reply, sizeof(*reply), 0);
 }
 
+/*
+Fragen für Tutorium:
+- Welche Imports sind ok? Ist string.h ok?
+*/
