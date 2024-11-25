@@ -1,6 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
+#include <regex.h>
 
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -72,7 +72,8 @@ int main(int argc, char *argv[]) {
     else {
         reply = "Reply";
     }
-    send(io_s, reply, sizeof(*reply), 0);
+    send(io_s, reply, strlen(reply), 0);
+    
 }
 
 /*
