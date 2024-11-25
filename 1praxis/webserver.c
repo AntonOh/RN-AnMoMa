@@ -1,7 +1,7 @@
-#include <cstddef>
 #include <stdio.h>
 #include <stdlib.h>
 #include <regex.h>
+#include <string.h>
 
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -38,14 +38,14 @@ static struct sockaddr_in derive_sockaddr(const char* host, const char* port) {
     return result;
 }
 
-int is_http_request_format(char input[20]) {
+int is_http_request_format(char input[8192]) {
     regex_t regex;
     int ret;
 
     //set and compile the regex pattern
-    ret = regcomp(&regex,"&regex, /^(GET|HEAD|POST|PUT|DELETE|CONNECT|OPTIONS|TRACE|PATCH) \/ HTTP\/[.0-9]+ \r\n Host: [a-zA-Z0-9.-]+\r\n[a-zA-Z0-9.-]*\r\n$", REG_EXTENDED);
+    ret = regcomp(&regex,"^(GET|HEAD|POST|PUT|DELETE|CONNECT|OPTIONS|TRACE|PATCH) / HTTP/[0-9.]+\r\n(.*\r\n)*\r\n$", REG_EXTENDED | REG_NEWLINE);
     //execute the match
-    ret = regexec(&regex, input, 1, NULL, NULL);
+    ret = regexec(&regex, input, 0, NULL, 0);
     //free the pattern
     regfree(&regex);
     if (!ret) {
@@ -66,7 +66,7 @@ int main(int argc, char *argv[]) {
     struct sockaddr_storage accept_adr;
     socklen_t len_accept_adr;
     char* reply;
-    char rec_buf[20];
+    char rec_buf[8192];
 
     struct sockaddr_in result = derive_sockaddr(argv[1], argv[2]); // creates hints-struct and does getaddrinfo
 
@@ -81,15 +81,14 @@ int main(int argc, char *argv[]) {
     len_accept_adr = sizeof(accept_adr);
     io_s = accept(s, (struct sockaddr *)&accept_adr, &len_accept_adr);
 
-    recv(io_s, rec_buf, sizeof(*rec_buf), 0);
-
+    recv(io_s, rec_buf, sizeof(rec_buf) - 1, 0);
+    rec_buf[sizeof(rec_buf) - 1] = '\0'; // Null-terminate the buffer
     if (is_http_request_format(rec_buf)) {
-            reply= "Reply\r\n\r\n";
+            reply= "temp: it fucking worked, also:Reply\r\n\r\n";
     }
     else {
-        reply = "Reply";
+        reply = rec_buf;
     }
     send(io_s, reply, strlen(reply), 0);
-    
 }
 
