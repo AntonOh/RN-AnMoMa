@@ -1,3 +1,4 @@
+#include <cstddef>
 #include <stdio.h>
 #include <stdlib.h>
 #include <regex.h>
@@ -37,6 +38,28 @@ static struct sockaddr_in derive_sockaddr(const char* host, const char* port) {
     return result;
 }
 
+int is_http_request_format(char input[20]) {
+    regex_t regex;
+    int ret;
+
+    //set and compile the regex pattern
+    ret = regcomp(&regex,"&regex, /^(GET|HEAD|POST|PUT|DELETE|CONNECT|OPTIONS|TRACE|PATCH) \/ HTTP\/[.0-9]+ \r\n Host: [a-zA-Z0-9.-]+\r\n[a-zA-Z0-9.-]*\r\n$", REG_EXTENDED);
+    //execute the match
+    ret = regexec(&regex, input, 1, NULL, NULL);
+    //free the pattern
+    regfree(&regex);
+    if (!ret) {
+        return 1; // Match found
+    } else if (ret == REG_NOMATCH) {
+        return 0; // No match
+    } else {
+        char errbuf[100];
+        regerror(ret, &regex, errbuf, sizeof(errbuf));
+        printf("Regex match failed: %s\n", errbuf);
+        return 0;
+    }
+}
+
 int main(int argc, char *argv[]) {
     int s;
     int io_s;
@@ -60,13 +83,7 @@ int main(int argc, char *argv[]) {
 
     recv(io_s, rec_buf, sizeof(*rec_buf), 0);
 
-    char* message_pointer = strstr(rec_buf, "/ HTTP/");
-    if (message_pointer > rec_buf+3) { //3 is an arbitrary value that should account for methods in front of "/ HTTP/"
-        for (int i = 0; i<3; i++) {
-            message_pointer = strstr(message_pointer, "\r\n"); //I should check strstr behavior when Haystack == NULL
-        }
-    }
-    if (message_pointer!=NULL) {
+    if (is_http_request_format(rec_buf)) {
             reply= "Reply\r\n\r\n";
     }
     else {
@@ -76,7 +93,3 @@ int main(int argc, char *argv[]) {
     
 }
 
-/*
-Fragen für Tutorium:
-- Welche Imports sind ok? Ist string.h ok?
-*/
