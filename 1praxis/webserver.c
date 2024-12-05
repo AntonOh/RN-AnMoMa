@@ -74,7 +74,10 @@ int main(int argc, char *argv[]) {
 
     // setsockopt(s, SOL_SOCKET, SO_REUSEADDR, NULL, sizeof(int));
 
-    bind(s, (struct sockaddr*) &result, sizeof(struct sockaddr));
+    if (bind(s, (struct sockaddr*) &result, sizeof(struct sockaddr))==-1){
+        printf("failed bind\n");
+        return -1;
+  }
     
     listen(s,5);
     
@@ -84,10 +87,12 @@ int main(int argc, char *argv[]) {
     recv(io_s, rec_buf, sizeof(rec_buf) - 1, 0);
     rec_buf[sizeof(rec_buf) - 1] = '\0'; // Null-terminate the buffer
     if (is_http_request_format(rec_buf)) {
-            reply= "temp: it fucking worked, also:Reply\r\n\r\n";
+        reply= "Reply\r\n\r\n";
+        printf("http recognized");
     }
     else {
-        reply = rec_buf;
+        reply = "Reply\n";
+        printf("%s\n",rec_buf);
     }
     send(io_s, reply, strlen(reply), 0);
 }
