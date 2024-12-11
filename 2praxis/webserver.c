@@ -299,7 +299,7 @@ static int setup_server_socket(struct sockaddr_in addr, int __type) {
  *  ./build/webserver self.ip self.port
  */
 int main(int argc, char **argv) {
-    if (argc != 3) {
+    if (argc < 3) {
         return EXIT_FAILURE;
     }
 
