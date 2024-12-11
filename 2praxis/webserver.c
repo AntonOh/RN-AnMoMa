@@ -245,26 +245,24 @@ static struct sockaddr_in derive_sockaddr(const char *host, const char *port) {
  *
  * @return The file descriptor of the created TCP server socket.
  */
-static int setup_server_socket(struct sockaddr_in addr, int __type) {
+static int setup_server_socket(struct sockaddr_in addr) {
     const int enable = 1;
     const int backlog = 1;
 
     // Create a socket
-    int sock = socket(AF_INET, __type, 0);
+    int sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock == -1) {
         perror("socket");
         exit(EXIT_FAILURE);
     }
 
-    if (__type == SOCK_STREAM) {
-        // Avoid dead lock on connections that are dropped after poll returns but
-        // before accept is called
-        if (fcntl(sock, F_SETFL, O_NONBLOCK) == -1) {
-            perror("fcntl");
-            exit(EXIT_FAILURE);
-        }
+    // Avoid dead lock on connections that are dropped after poll returns but
+    // before accept is called
+    if (fcntl(sock, F_SETFL, O_NONBLOCK) == -1) {
+        perror("fcntl");
+        exit(EXIT_FAILURE);
     }
-    
+
     // Set the SO_REUSEADDR socket option to allow reuse of local addresses
     if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(enable)) ==
         -1) {
@@ -279,13 +277,11 @@ static int setup_server_socket(struct sockaddr_in addr, int __type) {
         exit(EXIT_FAILURE);
     }
 
-    if (__type == SOCK_STREAM) {
-        // Start listening on the socket with maximum backlog of 1 pending
-        // connection
-        if (listen(sock, backlog)) {
-            perror("listen");
-            exit(EXIT_FAILURE);
-        }
+    // Start listening on the socket with maximum backlog of 1 pending
+    // connection
+    if (listen(sock, backlog)) {
+        perror("listen");
+        exit(EXIT_FAILURE);
     }
 
     return sock;
@@ -305,13 +301,12 @@ int main(int argc, char **argv) {
 
     struct sockaddr_in addr = derive_sockaddr(argv[1], argv[2]);
 
-    // Set up a UDP and TCP server socket.
-    int udp_server_socket = setup_server_socket(addr, SOCK_DGRAM);
-    int tcp_server_socket = setup_server_socket(addr, SOCK_STREAM);
+    // Set up a server socket.
+    int server_socket = setup_server_socket(addr);
 
     // Create an array of pollfd structures to monitor sockets.
     struct pollfd sockets[2] = {
-        {.fd = tcp_server_socket, .events = POLLIN},
+        {.fd = server_socket, .events = POLLIN},
     };
 
     struct connection_state state = {0};
@@ -333,14 +328,14 @@ int main(int argc, char **argv) {
             }
             int s = sockets[i].fd;
 
-            if (s == tcp_server_socket) {
+            if (s == server_socket) {
 
-                // If the event is on the tcp_server_socket, accept a new connection
+                // If the event is on the server_socket, accept a new connection
                 // from a client.
-                int connection = accept(tcp_server_socket, NULL, NULL);
+                int connection = accept(server_socket, NULL, NULL);
                 if (connection == -1 && errno != EAGAIN &&
                     errno != EWOULDBLOCK) {
-                    close(tcp_server_socket);
+                    close(server_socket);
                     perror("accept");
                     exit(EXIT_FAILURE);
                 } else {
