@@ -96,14 +96,19 @@ void send_reply(int conn, struct request *request) {
  * @return Returns the number of bytes processed from the packet.
  *         If the packet is successfully processed and a reply is sent, the
  * return value indicates the number of bytes processed. If the packet is
- * malformed or an error occurs during processing, the return value is -1.
+ * malformed or an error occurs during processing, the return value is -1.  
  *
  */
 size_t process_packet(int conn, char *buffer, size_t n) {
     struct request request = {
         .method = NULL, .uri = NULL, .payload = NULL, .payload_length = -1};
     ssize_t bytes_processed = parse_request(buffer, n, &request);
-
+    uint16_t hash = pseudo_hash(request.uri, strlen(request.uri));
+    if (hash>own_id && hash>=successor_id){ //<-should be true if current node is not responsible for that uri
+        //skip everything and send give the successor the task via udp package
+        send(to_successor, take care of this shit)
+        
+    }
     if (bytes_processed > 0) {
         send_reply(conn, &request);
 
@@ -224,7 +229,7 @@ static struct sockaddr_in derive_sockaddr(const char *host, const char *port) {
     // Resolve the host (IP address or hostname) into a list of possible
     // addresses.
     int returncode = getaddrinfo(host, port, &hints, &result_info);
-    if (returncode) {
+    if (returncode) { //remove this later for one line less yippieee
         fprintf(stderr, "Error parsing host/port");
         exit(EXIT_FAILURE);
     }
