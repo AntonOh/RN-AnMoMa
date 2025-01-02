@@ -299,12 +299,13 @@ static int setup_server_socket(struct sockaddr_in addr, int __type) {
 /**
  *  The program expects 3; otherwise, it returns EXIT_FAILURE.
  *
- *  Call as:
+ *  Call as (with exemplary values):
  *
- *  ./build/webserver self.ip self.port
+ *  PRED_ID=49152 PRED_IP=127.0.0.1 PRED_PORT=2002 SUCC_ID=49152 SUCC_IP=127.0.0.1
+    SUCC_PORT=2002 ./build/webserver 127.0.0.1 2001 16384
  */
 int main(int argc, char **argv) {
-    if (argc < 3) {
+    if (argc != 3) {
         return EXIT_FAILURE;
     }
 
