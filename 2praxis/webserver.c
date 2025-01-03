@@ -18,6 +18,35 @@
 
 #define MAX_RESOURCES 100
 
+typedef struct node_info {
+    int PRED_ID;
+    char *PRED_IP; 
+    int PRED_PORT; 
+    int SUCC_ID;
+    char* SUCC_IP;
+    int SUCC_PORT; 
+    char* MY_IP; 
+    int MY_PORT; 
+    int MY_ID;
+} node_info;
+
+node_info* fill_out_node_info(char* __MY_ID, char* __MY_IP , char* __MY_PORT) {
+    node_info* my_struct = malloc(sizeof(node_info));
+    my_struct->PRED_ID = atoi(getenv("PRED_ID"));
+    my_struct->PRED_IP = getenv("PRED_IP");
+    my_struct->PRED_PORT = atoi(getenv("PRED_PORT"));
+
+    my_struct->SUCC_ID = atoi(getenv("SUCC_ID"));
+    my_struct->SUCC_IP = getenv("SUCC_IP");
+    my_struct->SUCC_PORT = atoi(getenv("SUCC_PORT"));
+
+    my_struct->MY_ID = atoi(__MY_ID);
+    my_struct->MY_IP = __MY_IP;
+    my_struct->MY_PORT = atoi(__MY_PORT);
+
+    return my_struct;
+}
+
 struct tuple resources[MAX_RESOURCES] = {
     {"/static/foo", "Foo", sizeof "Foo" - 1},
     {"/static/bar", "Bar", sizeof "Bar" - 1},
