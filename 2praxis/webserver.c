@@ -48,9 +48,16 @@ node_info fill_out_node_info(char* __MY_ID, char* __MY_IP , char* __MY_PORT) {
     return my_struct;
 }
 
-// contains info from call looking like this: 
-// PRED_ID=16384 PRED_IP=127.0.0.1 PRED_PORT=2001 SUCC_ID=16384 SUCC_IP=127.0.0.1 SUCC_PORT=2001 ./build/webserver 127.0.0.1 2002 49152
+// global variable that has it's values assigned by calling fill_out_node_info in main
 struct node_info this_node;
+
+bool is_this_node_responsible(uint16_t __key){ // wip and currently not in use (do I need something like this later? let's see)
+    int _pred_id = atoi(this_node.PRED_ID);
+    int _succ_id = atoi(this_node.SUCC_ID);
+    int _my_id = atoi(this_node.MY_ID);
+
+    return false;
+}
 
 struct tuple resources[MAX_RESOURCES] = {
     {"/static/foo", "Foo", sizeof "Foo" - 1},
@@ -77,8 +84,14 @@ void send_reply(int conn, struct request *request) {
     // calculate hash of resource path
     uint16_t uri_hash = pseudo_hash(request->uri, strlen(request->uri));
     // check whether this node is responsible for the resource
-
-    if (strcmp(request->method, "GET") == 0) {
+    if (uri_hash<=atoi(this_node.SUCC_ID)) {
+        sprintf(reply, "HTTP/1.1 303 See Other\r\nLocation: http://%s:%s/hashhash\r\nContent-Length: 0\r\n\r\n",
+                this_node.SUCC_IP,this_node.SUCC_PORT);
+        offset = strlen(reply);
+        //HTTP/1.1 303 See Other
+        //Location: http://127.0.0.1:2002/hashhash
+        //Content-Length: 0
+    } else if (strcmp(request->method, "GET") == 0) {
         // Find the resource with the given URI in the 'resources' array.
         size_t resource_length;
         const char *resource =
@@ -335,7 +348,7 @@ static int setup_server_socket(struct sockaddr_in addr, int __type) {
  *  ./build/webserver self.ip self.port
  */
 int main(int argc, char **argv) {
-    if (argc != 3) {
+    if (argc < 2) { // it was argc != 3 before which is bad because the code should assume MY_ID is 0 when it isn't given instead of EXIT_FAILURE
         return EXIT_FAILURE;
     }
 
