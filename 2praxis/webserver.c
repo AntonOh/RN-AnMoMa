@@ -245,12 +245,12 @@ static struct sockaddr_in derive_sockaddr(const char *host, const char *port) {
  *
  * @return The file descriptor of the created TCP server socket.
  */
-static int setup_server_socket(struct sockaddr_in addr) {
+static int setup_server_socket(struct sockaddr_in addr, int __type) {
     const int enable = 1;
     const int backlog = 1;
 
     // Create a socket
-    int sock = socket(AF_INET, SOCK_STREAM, 0);
+    int sock = socket(AF_INET, __type, 0);
     if (sock == -1) {
         perror("socket");
         exit(EXIT_FAILURE);
@@ -277,11 +277,13 @@ static int setup_server_socket(struct sockaddr_in addr) {
         exit(EXIT_FAILURE);
     }
 
-    // Start listening on the socket with maximum backlog of 1 pending
-    // connection
-    if (listen(sock, backlog)) {
-        perror("listen");
-        exit(EXIT_FAILURE);
+    if (__type == SOCK_STREAM) {
+        // Start listening on the socket with maximum backlog of 1 pending
+        // connection
+        if (listen(sock, backlog)) {
+            perror("listen");
+            exit(EXIT_FAILURE);
+        }
     }
 
     return sock;
@@ -301,12 +303,14 @@ int main(int argc, char **argv) {
 
     struct sockaddr_in addr = derive_sockaddr(argv[1], argv[2]);
 
-    // Set up a server socket.
-    int server_socket = setup_server_socket(addr);
+    // Set up a UDP and TCP server socket.
+    int udp_server_socket = setup_server_socket(addr, SOCK_DGRAM);
+    int tcp_server_socket = setup_server_socket(addr, SOCK_STREAM);
 
     // Create an array of pollfd structures to monitor sockets.
-    struct pollfd sockets[2] = {
-        {.fd = server_socket, .events = POLLIN},
+    struct pollfd sockets[3] = {
+        {.fd = tcp_server_socket, .events = POLLIN},
+        {.fd = udp_server_socket, .events = POLLIN},
     };
 
     struct connection_state state = {0};
@@ -328,14 +332,14 @@ int main(int argc, char **argv) {
             }
             int s = sockets[i].fd;
 
-            if (s == server_socket) {
+            if (s == tcp_server_socket) {
 
-                // If the event is on the server_socket, accept a new connection
+                // If the event is on the tcp_server_socket, accept a new connection
                 // from a client.
-                int connection = accept(server_socket, NULL, NULL);
+                int connection = accept(tcp_server_socket, NULL, NULL);
                 if (connection == -1 && errno != EAGAIN &&
                     errno != EWOULDBLOCK) {
-                    close(server_socket);
+                    close(tcp_server_socket);
                     perror("accept");
                     exit(EXIT_FAILURE);
                 } else {
@@ -343,10 +347,19 @@ int main(int argc, char **argv) {
 
                     // limit to one connection at a time
                     sockets[0].events = 0;
-                    sockets[1].fd = connection;
-                    sockets[1].events = POLLIN;
+                    sockets[2].fd = connection;
+                    sockets[2].events = POLLIN;
                 }
-            } else {
+            } 
+            
+            else if (s == udp_server_socket) {
+                // If the event is on the udp_server_socket, accept a new connection
+                // from a client.
+                
+                //wip
+            }
+            
+            else {
                 assert(s == state.sock);
 
                 // Call the 'handle_connection' function to process the incoming
@@ -354,8 +367,8 @@ int main(int argc, char **argv) {
                 bool cont = handle_connection(&state);
                 if (!cont) { // get ready for a new connection
                     sockets[0].events = POLLIN;
-                    sockets[1].fd = -1;
-                    sockets[1].events = 0;
+                    sockets[2].fd = -1;
+                    sockets[2].events = 0;
                 }
             }
         }
