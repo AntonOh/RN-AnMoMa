@@ -1,5 +1,7 @@
+#ifndef DHT_H
+#define DHT_H
+
 #include <stdlib.h>
-#include <sys/types.h>
 
 typedef struct node_info {
     int PRED_ID;
@@ -14,3 +16,5 @@ typedef struct node_info {
 } node_info;
 
 node_info* prep_node_info_getenv();
+
+#endif

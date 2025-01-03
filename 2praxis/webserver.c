@@ -17,6 +17,7 @@
 #include "util.h"
 
 #include "dht.h"
+#include "dht.c" // why is this necessary for the programm to work?
 
 #define MAX_RESOURCES 100
 
