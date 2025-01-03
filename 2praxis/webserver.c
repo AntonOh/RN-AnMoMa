@@ -19,30 +19,31 @@
 #define MAX_RESOURCES 100
 
 typedef struct node_info {
-    int PRED_ID;
-    char *PRED_IP; 
-    int PRED_PORT; 
-    int SUCC_ID;
+    char* PRED_ID;
+    char* PRED_IP; 
+    char* PRED_PORT; 
+    char* SUCC_ID;
     char* SUCC_IP;
-    int SUCC_PORT; 
+    char* SUCC_PORT; 
     char* MY_IP; 
-    int MY_PORT; 
-    int MY_ID;
+    char* MY_PORT; 
+    char* MY_ID;
 } node_info;
 
-node_info* fill_out_node_info(char* __MY_ID, char* __MY_IP , char* __MY_PORT) {
-    node_info* my_struct = malloc(sizeof(node_info));
-    my_struct->PRED_ID = atoi(getenv("PRED_ID"));
-    my_struct->PRED_IP = getenv("PRED_IP");
-    my_struct->PRED_PORT = atoi(getenv("PRED_PORT"));
+node_info fill_out_node_info(char* __MY_ID, char* __MY_IP , char* __MY_PORT) {
+    node_info my_struct;
+    my_struct.PRED_ID = getenv("PRED_ID");
+    my_struct.PRED_IP = getenv("PRED_IP");
+    my_struct.PRED_PORT = getenv("PRED_PORT");
 
-    my_struct->SUCC_ID = atoi(getenv("SUCC_ID"));
-    my_struct->SUCC_IP = getenv("SUCC_IP");
-    my_struct->SUCC_PORT = atoi(getenv("SUCC_PORT"));
+    my_struct.SUCC_ID = getenv("SUCC_ID");
+    my_struct.SUCC_IP = getenv("SUCC_IP");
+    my_struct.SUCC_PORT = getenv("SUCC_PORT");
 
-    my_struct->MY_ID = atoi(__MY_ID);
-    my_struct->MY_IP = __MY_IP;
-    my_struct->MY_PORT = atoi(__MY_PORT);
+    if (__MY_ID == NULL) {my_struct.MY_ID = "0";}
+    else {my_struct.MY_ID = __MY_ID;}
+    my_struct.MY_IP = __MY_IP;
+    my_struct.MY_PORT = __MY_PORT;
 
     return my_struct;
 }
@@ -335,6 +336,10 @@ int main(int argc, char **argv) {
     // Set up a UDP and TCP server socket.
     int udp_server_socket = setup_server_socket(addr, SOCK_DGRAM);
     int tcp_server_socket = setup_server_socket(addr, SOCK_STREAM);
+
+    // gathers info from call looking like this: 
+    // PRED_ID=16384 PRED_IP=127.0.0.1 PRED_PORT=2001 SUCC_ID=16384 SUCC_IP=127.0.0.1 SUCC_PORT=2001 ./build/webserver 127.0.0.1 2002 49152
+    struct node_info this_node = fill_out_node_info(argv[3], argv[1], argv[2]); //I am not converting the numbers from char* to int since this breaks the first test?
 
     // Create an array of pollfd structures to monitor sockets.
     struct pollfd sockets[3] = {
