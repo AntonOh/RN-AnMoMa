@@ -12,3 +12,5 @@ typedef struct node_info {
     int MY_PORT; 
     int MY_ID;
 } node_info;
+
+node_info* prep_node_info_getenv();

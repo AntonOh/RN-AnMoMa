@@ -16,6 +16,8 @@
 #include "http.h"
 #include "util.h"
 
+#include "dht.h"
+
 #define MAX_RESOURCES 100
 
 struct tuple resources[MAX_RESOURCES] = {
@@ -302,6 +304,12 @@ int main(int argc, char **argv) {
     }
 
     struct sockaddr_in addr = derive_sockaddr(argv[1], argv[2]);
+
+    // putting all the infos that define this node into a single struct
+    node_info* this_node = prep_node_info_getenv();
+    this_node->MY_ID = atoi(argv[2]);
+    this_node->MY_IP = argv[0];
+    this_node->MY_PORT = atoi(argv[1]);
 
     // Set up a UDP and TCP server socket.
     int udp_server_socket = setup_server_socket(addr, SOCK_DGRAM);
