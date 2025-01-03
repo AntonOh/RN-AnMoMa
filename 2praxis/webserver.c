@@ -48,6 +48,10 @@ node_info fill_out_node_info(char* __MY_ID, char* __MY_IP , char* __MY_PORT) {
     return my_struct;
 }
 
+// contains info from call looking like this: 
+// PRED_ID=16384 PRED_IP=127.0.0.1 PRED_PORT=2001 SUCC_ID=16384 SUCC_IP=127.0.0.1 SUCC_PORT=2001 ./build/webserver 127.0.0.1 2002 49152
+struct node_info this_node;
+
 struct tuple resources[MAX_RESOURCES] = {
     {"/static/foo", "Foo", sizeof "Foo" - 1},
     {"/static/bar", "Bar", sizeof "Bar" - 1},
@@ -70,8 +74,9 @@ void send_reply(int conn, struct request *request) {
     fprintf(stderr, "Handling %s request for %s (%lu byte payload)\n",
             request->method, request->uri, request->payload_length);
 
-    //calculate hash of resource path
+    // calculate hash of resource path
     uint16_t uri_hash = pseudo_hash(request->uri, strlen(request->uri));
+    // check whether this node is responsible for the resource
 
     if (strcmp(request->method, "GET") == 0) {
         // Find the resource with the given URI in the 'resources' array.
@@ -342,7 +347,7 @@ int main(int argc, char **argv) {
 
     // gathers info from call looking like this: 
     // PRED_ID=16384 PRED_IP=127.0.0.1 PRED_PORT=2001 SUCC_ID=16384 SUCC_IP=127.0.0.1 SUCC_PORT=2001 ./build/webserver 127.0.0.1 2002 49152
-    struct node_info this_node = fill_out_node_info(argv[3], argv[1], argv[2]); //I am not converting the numbers from char* to int since this breaks the first test?
+    this_node = fill_out_node_info(argv[3], argv[1], argv[2]); //I am not converting the numbers from char* to int since this breaks the first test?
 
     // Create an array of pollfd structures to monitor sockets.
     struct pollfd sockets[3] = {
