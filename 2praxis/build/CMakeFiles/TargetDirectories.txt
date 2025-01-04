@@ -1,0 +1,5 @@
+/home/umalula/tub/2praxis/build/CMakeFiles/webserver.dir
+/home/umalula/tub/2praxis/build/CMakeFiles/package.dir
+/home/umalula/tub/2praxis/build/CMakeFiles/package_source.dir
+/home/umalula/tub/2praxis/build/CMakeFiles/edit_cache.dir
+/home/umalula/tub/2praxis/build/CMakeFiles/rebuild_cache.dir
