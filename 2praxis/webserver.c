@@ -17,9 +17,15 @@
 #include "util.h"
 
 #define MAX_RESOURCES 100
+#define LOOKUP 0
+#define REPLY 1
 
-typedef struct node_info {
-    char* PRED_ID;
+int udp_server_socket; // global variable which is filled in main() and used in send_reply()
+
+struct node_info this_node; // global variable that has it's values assigned by calling fill_out_node_info in main()
+
+typedef struct node_info {  // ID, IP and PORT are saved as char* because conversion to different data types 
+    char* PRED_ID;          // in fill_out_node_info let the tests fail
     char* PRED_IP; 
     char* PRED_PORT; 
     char* SUCC_ID;
@@ -30,6 +36,16 @@ typedef struct node_info {
     char* MY_ID;
 } node_info;
 
+/**
+ * Fills out a node_info struct which contains ID, IP and PORT of this node 
+ * and it's successor and predecessor in the dht.
+ *
+ * @param __MY_ID ID of this node in the dht
+ * @param __MY_IP IP of this node
+ * @param __MY_PORT assigned port of this node
+ *
+ * @return struct node_info filled out with data on this, the previous and the successor node
+ */
 node_info fill_out_node_info(char* __MY_ID, char* __MY_IP , char* __MY_PORT) {
     node_info my_struct;
     my_struct.PRED_ID = getenv("PRED_ID");
@@ -48,21 +64,78 @@ node_info fill_out_node_info(char* __MY_ID, char* __MY_IP , char* __MY_PORT) {
     return my_struct;
 }
 
-// global variable that has it's values assigned by calling fill_out_node_info in main
-struct node_info this_node;
+/**
+ * Formulates 11 bytes into a message using info from the global variable this_node.
+ * Meant to be sent inside the dht via udp.
+ *
+ * @param __message_type The type of the message, either LOOKUP(=0) or REPLY(=1)
+ * @param __uri_hash hash value of the resource this message is about
+ *
+ * @return pointer (char*) to 11 byte long message
+ */
+char* dht_udp_message(u_int8_t __message_type, u_int16_t __uri_hash, char* __id, char* __ip, char* __port){
+    char* message = calloc(11, sizeof(char));
 
-bool is_this_node_responsible(uint16_t __key){ // wip and currently not in use (do I need something like this later? let's see)
-    int _pred_id = atoi(this_node.PRED_ID);
-    int _succ_id = atoi(this_node.SUCC_ID);
-    int _my_id = atoi(this_node.MY_ID);
+    // at pos. 0: type of the message, either LOOKUP(=0) or REPLY(=1)
+    uint8_t _nbo_type = htons(__message_type);
+    memcpy(message, &_nbo_type, sizeof(_nbo_type));
 
-    return false;
+    // at pos. 1-2: hash value of the resource this message is about
+    uint16_t _nbo_hash = htons(__uri_hash);
+    memcpy(message+1, &_nbo_hash, sizeof(_nbo_hash));
+
+    // at pos. 3-4: id
+    uint16_t _nbo_id = htons(atoi(__id));
+    memcpy(message+3, &_nbo_id, sizeof(_nbo_id));
+
+    // at pos. 5-8: ip
+    uint32_t _ip_binary;
+    inet_pton(AF_INET, __ip, &_ip_binary);
+    memcpy(message+5, &_ip_binary, sizeof(_ip_binary));
+
+    // at pos. 9-10: port
+    uint16_t _nbo_port = htons(atoi(__port));
+    memcpy(message+9, &_nbo_port, sizeof(_nbo_port));
+
+    return message;
 }
 
 struct tuple resources[MAX_RESOURCES] = {
     {"/static/foo", "Foo", sizeof "Foo" - 1},
     {"/static/bar", "Bar", sizeof "Bar" - 1},
     {"/static/baz", "Baz", sizeof "Baz" - 1}};
+
+/**
+ * Derives a sockaddr_in structure from the provided host and port information.
+ *
+ * @param host The host (IP address or hostname) to be resolved into a network
+ * address.
+ * @param port The port number to be converted into network byte order.
+ *
+ * @return A sockaddr_in structure representing the network address derived from
+ * the host and port.
+ */
+static struct sockaddr_in derive_sockaddr(const char *host, const char *port) {
+    struct addrinfo hints = {
+        .ai_family = AF_INET,
+    };
+    struct addrinfo *result_info;
+
+    // Resolve the host (IP address or hostname) into a list of possible
+    // addresses.
+    int returncode = getaddrinfo(host, port, &hints, &result_info);
+    if (returncode) {
+        fprintf(stderr, "Error parsing host/port");
+        exit(EXIT_FAILURE);
+    }
+
+    // Copy the sockaddr_in structure from the first address in the list
+    struct sockaddr_in result = *((struct sockaddr_in *)result_info->ai_addr);
+
+    // Free the allocated memory for the result_info
+    freeaddrinfo(result_info);
+    return result;
+}
 
 /**
  * Sends an HTTP reply to the client based on the received request.
@@ -83,15 +156,26 @@ void send_reply(int conn, struct request *request) {
 
     // calculate hash of resource path
     uint16_t uri_hash = pseudo_hash(request->uri, strlen(request->uri));
-    // check whether this node is responsible for the resource
-    if (uri_hash<=atoi(this_node.SUCC_ID)) {
+    if (uri_hash<=atoi(this_node.SUCC_ID)) { // check whether successor node is responsible for the resource // is that even necessary still?
         sprintf(reply, "HTTP/1.1 303 See Other\r\nLocation: http://%s:%s/hashhash\r\nContent-Length: 0\r\n\r\n",
                 this_node.SUCC_IP,this_node.SUCC_PORT);
-        offset = strlen(reply);
         //HTTP/1.1 303 See Other
         //Location: http://127.0.0.1:2002/hashhash
         //Content-Length: 0
-    } else if (strcmp(request->method, "GET") == 0) {
+        offset = strlen(reply);
+
+    } else if (uri_hash>atoi(this_node.MY_ID) && uri_hash<=atoi(this_node.PRED_ID)) { // check if other node is responsible and send simple lookup if so 
+        sprintf(reply, "HTTP/1.1 503 Service Unavailable\r\nRetry-After: 1\r\nContent-Length: 0\r\n\r\n");
+        //HTTP/1.1 503 Service Unavailable
+        //Retry-After: 1
+        //Content-Length: 0
+        offset = strlen(reply);
+        char* message_succ = dht_udp_message(LOOKUP, uri_hash, this_node.MY_ID, this_node.MY_IP, this_node.MY_PORT);
+        const struct sockaddr_in succ_addr = derive_sockaddr(this_node.SUCC_IP, this_node.SUCC_PORT);
+        sendto(udp_server_socket, message_succ, 11, 0, &succ_addr, sizeof(succ_addr));
+        free(message_succ);
+
+    } else if (strcmp(request->method, "GET") == 0) { // if we reach this point this node is responsible for the request
         // Find the resource with the given URI in the 'resources' array.
         size_t resource_length;
         const char *resource =
@@ -257,38 +341,6 @@ bool handle_connection(struct connection_state *state) {
 }
 
 /**
- * Derives a sockaddr_in structure from the provided host and port information.
- *
- * @param host The host (IP address or hostname) to be resolved into a network
- * address.
- * @param port The port number to be converted into network byte order.
- *
- * @return A sockaddr_in structure representing the network address derived from
- * the host and port.
- */
-static struct sockaddr_in derive_sockaddr(const char *host, const char *port) {
-    struct addrinfo hints = {
-        .ai_family = AF_INET,
-    };
-    struct addrinfo *result_info;
-
-    // Resolve the host (IP address or hostname) into a list of possible
-    // addresses.
-    int returncode = getaddrinfo(host, port, &hints, &result_info);
-    if (returncode) {
-        fprintf(stderr, "Error parsing host/port");
-        exit(EXIT_FAILURE);
-    }
-
-    // Copy the sockaddr_in structure from the first address in the list
-    struct sockaddr_in result = *((struct sockaddr_in *)result_info->ai_addr);
-
-    // Free the allocated memory for the result_info
-    freeaddrinfo(result_info);
-    return result;
-}
-
-/**
  * Sets up a TCP server socket and binds it to the provided sockaddr_in address.
  *
  * @param addr The sockaddr_in structure representing the IP address and port of
@@ -355,7 +407,7 @@ int main(int argc, char **argv) {
     struct sockaddr_in addr = derive_sockaddr(argv[1], argv[2]);
 
     // Set up a UDP and TCP server socket.
-    int udp_server_socket = setup_server_socket(addr, SOCK_DGRAM);
+    udp_server_socket = setup_server_socket(addr, SOCK_DGRAM); //gloabal variable which is defined up top and later used in send_reply()
     int tcp_server_socket = setup_server_socket(addr, SOCK_STREAM);
 
     // gathers info from call looking like this: 
@@ -408,10 +460,17 @@ int main(int argc, char **argv) {
             } 
             
             else if (s == udp_server_socket) {
-                // If the event is on the udp_server_socket, accept a new connection
-                // from a client.
+                // If the event is on the udp_server_socket
+                char* _buff = calloc(11, sizeof(char));
+                recvfrom(s, _buff, 11, 0, NULL, NULL);
+                uint16_t _hash;
+                memcpy(&_hash, _buff+1, sizeof(_hash)); 
+                if (_hash>this_node.MY_ID) {
+                }
                 
-                //wip
+                
+                //wip?
+                free(_buff);
             }
             
             else {

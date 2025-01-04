@@ -271,7 +271,6 @@ CMakeFiles/webserver.dir/webserver.c.o: ../webserver.c \
   /usr/include/poll.h \
   /usr/include/x86_64-linux-gnu/sys/poll.h \
   /usr/include/x86_64-linux-gnu/bits/poll.h \
-  /usr/lib/gcc/x86_64-linux-gnu/11/include/stdbool.h \
   /usr/lib/gcc/x86_64-linux-gnu/11/include/stdint.h \
   /usr/include/stdint.h \
   /usr/include/x86_64-linux-gnu/bits/libc-header-start.h \
@@ -299,6 +298,7 @@ CMakeFiles/webserver.dir/webserver.c.o: ../webserver.c \
   /usr/include/x86_64-linux-gnu/bits/getopt_core.h \
   /usr/include/x86_64-linux-gnu/bits/unistd_ext.h \
   ../data.h \
+  /usr/lib/gcc/x86_64-linux-gnu/11/include/stdbool.h \
   /usr/include/stdlib.h \
   /usr/include/x86_64-linux-gnu/bits/waitflags.h \
   /usr/include/x86_64-linux-gnu/bits/waitstatus.h \
