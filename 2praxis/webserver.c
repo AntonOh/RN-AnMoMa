@@ -77,8 +77,8 @@ char* dht_udp_message(u_int8_t __message_type, u_int16_t __uri_hash, char* __id,
     char* message = calloc(11, sizeof(char));
 
     // at pos. 0: type of the message, either LOOKUP(=0) or REPLY(=1)
-    uint8_t _nbo_type = htons(__message_type);
-    memcpy(message, &_nbo_type, sizeof(_nbo_type));
+    uint8_t _nbo_type = htons(__message_type); // hton here fails test_lookup_reply
+    memcpy(message, &__message_type, sizeof(__message_type));
 
     // at pos. 1-2: hash value of the resource this message is about
     uint16_t _nbo_hash = htons(__uri_hash);
@@ -460,22 +460,23 @@ int main(int argc, char **argv) {
                 uint16_t _hash;
                 memcpy(&_hash, _buff+1, sizeof(_hash)); 
                 
-                char* message_succ = calloc(11, sizeof(char));
-                if (_hash<=atoi(this_node.SUCC_ID)) { // check whether successor node is responsible for the resource
+                if (_hash<=atoi(this_node.SUCC_ID)) { // check whether successor node is responsible
                     char* message_succ = dht_udp_message(REPLY, 
                     atoi(this_node.MY_ID), this_node.SUCC_ID, this_node.SUCC_IP, this_node.SUCC_PORT);
-                    sendto(udp_server_socket, message_succ, 11, 0, inquirer_adr, *inquirer_adr_len);
+                    const struct sockaddr_in pred_addr = derive_sockaddr(this_node.PRED_IP, this_node.PRED_PORT);
+                    sendto(udp_server_socket, message_succ, 11, 0, &pred_addr, sizeof(pred_addr));
 
-                } else if (_hash<=atoi(this_node.MY_ID) && _hash>atoi(this_node.PRED_ID)) { // check if this node is responsible
+                } else if (_hash<=atoi(this_node.MY_ID)) { // check if this node is responsible
                     char* message_succ = dht_udp_message(REPLY, 
                     atoi(this_node.PRED_ID), this_node.MY_ID, this_node.MY_IP, this_node.MY_PORT);
-                    sendto(udp_server_socket, message_succ, 11, 0, inquirer_adr, *inquirer_adr_len);
+                    const struct sockaddr_in pred_addr = derive_sockaddr(this_node.PRED_IP, this_node.PRED_PORT);
+                    sendto(udp_server_socket, message_succ, 11, 0, &pred_addr, sizeof(pred_addr));
 
-                } else {
-                    char* message_succ = _buff;
+                } else { // forwards the message
+                    const struct sockaddr_in succ_addr = derive_sockaddr(this_node.SUCC_IP, this_node.SUCC_PORT);
+                    sendto(udp_server_socket, _buff, 11, 0, &succ_addr, sizeof(succ_addr));
                 }
                 
-                free(message_succ);
                 free(_buff);
             }
             
