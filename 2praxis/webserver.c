@@ -156,15 +156,7 @@ void send_reply(int conn, struct request *request) {
 
     // calculate hash of resource path
     uint16_t uri_hash = pseudo_hash(request->uri, strlen(request->uri));
-    if (uri_hash<=atoi(this_node.SUCC_ID)) { // check whether successor node is responsible for the resource // is that even necessary still?
-        sprintf(reply, "HTTP/1.1 303 See Other\r\nLocation: http://%s:%s/hashhash\r\nContent-Length: 0\r\n\r\n",
-                this_node.SUCC_IP,this_node.SUCC_PORT);
-        //HTTP/1.1 303 See Other
-        //Location: http://127.0.0.1:2002/hashhash
-        //Content-Length: 0
-        offset = strlen(reply);
-
-    } else if (uri_hash>atoi(this_node.MY_ID) && uri_hash<=atoi(this_node.PRED_ID)) { // check if other node is responsible and send simple lookup if so 
+    if (uri_hash>atoi(this_node.MY_ID) && uri_hash<=atoi(this_node.PRED_ID)) { // check if other node is responsible and send simple lookup if so 
         sprintf(reply, "HTTP/1.1 503 Service Unavailable\r\nRetry-After: 1\r\nContent-Length: 0\r\n\r\n");
         //HTTP/1.1 503 Service Unavailable
         //Retry-After: 1
