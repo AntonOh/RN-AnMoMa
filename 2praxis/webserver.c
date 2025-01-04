@@ -462,14 +462,28 @@ int main(int argc, char **argv) {
             else if (s == udp_server_socket) {
                 // If the event is on the udp_server_socket
                 char* _buff = calloc(11, sizeof(char));
-                recvfrom(s, _buff, 11, 0, NULL, NULL);
+                struct sockaddr *restrict inquirer_adr = calloc(1, sizeof(struct sockaddr));
+                socklen_t *restrict inquirer_adr_len = calloc(1, sizeof(socklen_t));
+                recvfrom(s, _buff, 11, 0, inquirer_adr, inquirer_adr_len);
                 uint16_t _hash;
                 memcpy(&_hash, _buff+1, sizeof(_hash)); 
-                if (_hash>this_node.MY_ID) {
+                
+                char* message_succ = calloc(11, sizeof(char));
+                if (_hash<=atoi(this_node.SUCC_ID)) { // check whether successor node is responsible for the resource
+                    char* message_succ = dht_udp_message(REPLY, 
+                    atoi(this_node.MY_ID), this_node.SUCC_ID, this_node.SUCC_IP, this_node.SUCC_PORT);
+                    sendto(udp_server_socket, message_succ, 11, 0, inquirer_adr, *inquirer_adr_len);
+
+                } else if (_hash<=atoi(this_node.MY_ID) && _hash>atoi(this_node.PRED_ID)) { // check if this node is responsible
+                    char* message_succ = dht_udp_message(REPLY, 
+                    atoi(this_node.PRED_ID), this_node.MY_ID, this_node.MY_IP, this_node.MY_PORT);
+                    sendto(udp_server_socket, message_succ, 11, 0, inquirer_adr, *inquirer_adr_len);
+
+                } else {
+                    char* message_succ = _buff;
                 }
                 
-                
-                //wip?
+                free(message_succ);
                 free(_buff);
             }
             
