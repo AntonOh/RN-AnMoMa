@@ -174,7 +174,7 @@ void send_reply(int conn, struct request *request) {
             request->method, request->uri, request->payload_length);
 
     // calculate hash of resource path
-    uint16_t uri_hash = pseudo_hash(request->uri, strlen(request->uri));
+    uint16_t uri_hash = pseudo_hash((const unsigned char *)request->uri, strlen(request->uri));
     if (uri_hash>atoi(this_node.MY_ID) && uri_hash<=atoi(this_node.PRED_ID)) { // check if other node is responsible and send simple lookup if so 
         sprintf(reply, "HTTP/1.1 503 Service Unavailable\r\nRetry-After: 1\r\nContent-Length: 0\r\n\r\n");
         //HTTP/1.1 503 Service Unavailable
@@ -183,7 +183,7 @@ void send_reply(int conn, struct request *request) {
         offset = strlen(reply);
         char* message_succ = dht_udp_message(LOOKUP, uri_hash, this_node.MY_ID, this_node.MY_IP, this_node.MY_PORT);
         const struct sockaddr_in succ_addr = derive_sockaddr(this_node.SUCC_IP, this_node.SUCC_PORT);
-        sendto(udp_server_socket, message_succ, 11, 0, &succ_addr, sizeof(succ_addr));
+        sendto(udp_server_socket, message_succ, 11, 0, (struct sockaddr *)&succ_addr, sizeof(succ_addr));
         free(message_succ);
 
     } else if (strcmp(request->method, "GET") == 0) { // if we reach this point this node is responsible for the request
@@ -485,18 +485,17 @@ int main(int argc, char **argv) {
                     char* message_succ = dht_udp_message(REPLY, // successor responsible
                     atoi(this_node.MY_ID), this_node.SUCC_ID, this_node.SUCC_IP, this_node.SUCC_PORT);
                     
-                    const struct sockaddr_in pred_addr = derive_sockaddr(this_node.PRED_IP, this_node.PRED_PORT);
-                    sendto(udp_server_socket, message_succ, 11, 0, &client_addr, client_len);
+                    sendto(udp_server_socket, message_succ, 11, 0, (struct sockaddr *)&client_addr, client_len);
 
                 } else if (is_node_responsible(atoi(this_node.PRED_ID), atoi(this_node.MY_ID), _hash)) { // check if this node is responsible
                     char* message_succ = dht_udp_message(REPLY, // I am responsible
                     atoi(this_node.PRED_ID), this_node.MY_ID, this_node.MY_IP, this_node.MY_PORT);
-                    const struct sockaddr_in pred_addr = derive_sockaddr(this_node.PRED_IP, this_node.PRED_PORT);
-                    sendto(udp_server_socket, message_succ, 11, 0, &client_addr, client_len);
+                    
+                    sendto(udp_server_socket, message_succ, 11, 0, (struct sockaddr *)&client_addr, client_len);
 
                 } else { // forwards the message
                     const struct sockaddr_in succ_addr = derive_sockaddr(this_node.SUCC_IP, this_node.SUCC_PORT);
-                    sendto(udp_server_socket, _buff, 11, 0, &succ_addr, sizeof(succ_addr));
+                    sendto(udp_server_socket, _buff, 11, 0, (struct sockaddr *)&succ_addr, sizeof(succ_addr));
                 }
                 
                 free(_buff);
