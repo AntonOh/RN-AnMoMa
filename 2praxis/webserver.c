@@ -24,6 +24,11 @@ int udp_server_socket; // global variable which is filled in main() and used in 
 
 struct node_info this_node; // global variable that has it's values assigned by calling fill_out_node_info in main()
 
+struct tuple resources[MAX_RESOURCES] = { // defines resources of our dht
+    {"/static/foo", "Foo", sizeof "Foo" - 1},
+    {"/static/bar", "Bar", sizeof "Bar" - 1},
+    {"/static/baz", "Baz", sizeof "Baz" - 1}};
+
 typedef struct node_info {  // ID, IP and PORT are saved as char* because conversion to different data types 
     char* PRED_ID;          // in fill_out_node_info let the tests fail
     char* PRED_IP; 
@@ -77,7 +82,7 @@ char* dht_udp_message(u_int8_t __message_type, u_int16_t __uri_hash, char* __id,
     char* message = calloc(11, sizeof(char));
 
     // at pos. 0: type of the message, either LOOKUP(=0) or REPLY(=1)
-    uint8_t _nbo_type = htons(__message_type); // hton here fails test_lookup_reply
+    uint8_t _nbo_type = htons(__message_type); // hton here fails test_lookup_reply // delete this later?
     memcpy(message, &__message_type, sizeof(__message_type));
 
     // at pos. 1-2: hash value of the resource this message is about
@@ -100,10 +105,24 @@ char* dht_udp_message(u_int8_t __message_type, u_int16_t __uri_hash, char* __id,
     return message;
 }
 
-struct tuple resources[MAX_RESOURCES] = {
-    {"/static/foo", "Foo", sizeof "Foo" - 1},
-    {"/static/bar", "Bar", sizeof "Bar" - 1},
-    {"/static/baz", "Baz", sizeof "Baz" - 1}};
+/**
+ * Answers if __node_in_question is responsible for the resource with the hash id __hash
+ *
+ * @param __node_in_question is the node we are asking the responsibility question for
+ * @param __predecessor_node is the predecessor node of __node_in_question
+ * @param __hash_id is the hash id of the resource __node_in_question might be responsible for
+ *
+ * @return True if __node_in_question is responsible, False if it isn't
+ */
+bool is_node_responsible(uint16_t __predecessor_node, uint16_t __node_in_question, uint16_t __hash_id) {
+    if (__predecessor_node < __node_in_question) {
+        // Case 1: __predecessor_node and __node_in_question are in the normal range
+        return (__hash_id > __predecessor_node && __hash_id <= __node_in_question);
+    } else {
+        // Case 2: __node_in_question wraps around to the beginning of the ring
+        return (__hash_id > __predecessor_node || __hash_id <= __node_in_question);
+    }
+}
 
 /**
  * Derives a sockaddr_in structure from the provided host and port information.
@@ -454,23 +473,26 @@ int main(int argc, char **argv) {
             else if (s == udp_server_socket) {
                 // If the event is on the udp_server_socket
                 char* _buff = calloc(11, sizeof(char));
-                struct sockaddr *restrict inquirer_adr = calloc(1, sizeof(struct sockaddr));
-                socklen_t *restrict inquirer_adr_len = calloc(1, sizeof(socklen_t));
-                recvfrom(s, _buff, 11, 0, inquirer_adr, inquirer_adr_len);
+                struct sockaddr_in client_addr;
+                socklen_t client_len = sizeof(client_addr);
+                
+                recvfrom(s, _buff, 11, 0, (struct sockaddr *)&client_addr, &client_len);
+                
                 uint16_t _hash;
                 memcpy(&_hash, _buff+1, sizeof(_hash)); 
                 
-                if (_hash<=atoi(this_node.SUCC_ID)) { // check whether successor node is responsible
-                    char* message_succ = dht_udp_message(REPLY, 
+                if (is_node_responsible(atoi(this_node.MY_ID), atoi(this_node.SUCC_ID),_hash)) { // check whether successor node is responsible
+                    char* message_succ = dht_udp_message(REPLY, // successor responsible
                     atoi(this_node.MY_ID), this_node.SUCC_ID, this_node.SUCC_IP, this_node.SUCC_PORT);
+                    
                     const struct sockaddr_in pred_addr = derive_sockaddr(this_node.PRED_IP, this_node.PRED_PORT);
-                    sendto(udp_server_socket, message_succ, 11, 0, &pred_addr, sizeof(pred_addr));
+                    sendto(udp_server_socket, message_succ, 11, 0, &client_addr, client_len);
 
-                } else if (_hash<=atoi(this_node.MY_ID)) { // check if this node is responsible
-                    char* message_succ = dht_udp_message(REPLY, 
+                } else if (is_node_responsible(atoi(this_node.PRED_ID), atoi(this_node.MY_ID), _hash)) { // check if this node is responsible
+                    char* message_succ = dht_udp_message(REPLY, // I am responsible
                     atoi(this_node.PRED_ID), this_node.MY_ID, this_node.MY_IP, this_node.MY_PORT);
                     const struct sockaddr_in pred_addr = derive_sockaddr(this_node.PRED_IP, this_node.PRED_PORT);
-                    sendto(udp_server_socket, message_succ, 11, 0, &pred_addr, sizeof(pred_addr));
+                    sendto(udp_server_socket, message_succ, 11, 0, &client_addr, client_len);
 
                 } else { // forwards the message
                     const struct sockaddr_in succ_addr = derive_sockaddr(this_node.SUCC_IP, this_node.SUCC_PORT);
