@@ -27,6 +27,9 @@
 
 #define LOOKUP 0
 #define REPLY 1
+
+#define BUFFER_SIZE 10
+
 int udp_server_socket; // global variable which is filled in main() and used in send_reply()
 
 struct node_info this_node; // global variable that has it's values assigned by calling fill_out_node_info in main()
@@ -52,41 +55,67 @@ typedef struct single_node_info { // used in a linked list to save the content o
     char* IP; 
     uint16_t PORT; 
     uint16_t ID;
-    struct single_node_info* list_link;
 } single_node_info;
 
-single_node_info* saved_replies = NULL; // global variable
+typedef struct {
+    single_node_info buffer[BUFFER_SIZE];
+    int start;  // Index of the oldest item
+    int count;  // Number of items in the buffer
+} CircularBuffer;
 
-void get_node_from_dht_message(char* message , single_node_info* list_entry) {
+void initBuffer(CircularBuffer *cb) {
+    cb->start = 0;
+    cb->count = 0;
+    memset(cb->buffer, 0, sizeof(cb->buffer));
+}
+
+void addItem(CircularBuffer *cb, single_node_info item) {
+    int end = (cb->start + cb->count) % BUFFER_SIZE;
+    cb->buffer[end] = item;
+    if (cb->count == BUFFER_SIZE) {
+        // Buffer is full, move the start index
+        cb->start = (cb->start + 1) % BUFFER_SIZE;
+    } else {
+        cb->count++;
+    }
+}
+
+bool hash_in_buffer(CircularBuffer *cb, uint16_t __hash, single_node_info* __result) {
+    printf("Buffer: ");
+    for (int i = 0; i < cb->count; i++) {
+        int index = (cb->start + i) % BUFFER_SIZE;
+        if (cb->buffer[index].ID == __hash) {
+            __result = &cb->buffer[index];
+            return true;
+        }
+    }
+    return false;
+}
+
+CircularBuffer* reply_buffer; // global variable
+
+single_node_info get_node_from_dht_message(char* message) {
+    single_node_info buffer_entry;
     // at pos. 3-4: ip
     uint16_t _id;
     memcpy(&_id, message+3, sizeof(_id));
     _id = ntohs(_id);
-    list_entry->ID = _id;
+    buffer_entry.ID = _id;
 
     // at pos. 5-8: ip
     uint32_t _ip_binary;
     char _ip[INET_ADDRSTRLEN];
     memcpy(&_ip_binary, message+5, sizeof(_ip_binary));
     inet_ntop(AF_INET, &_ip_binary, _ip, sizeof(_ip));
-    list_entry->IP = _ip;
+    buffer_entry.IP = _ip;
 
     // at pos. 9-10: port
     uint16_t _port;
     memcpy(&_port, message+9, sizeof(_port));
     _port = ntohs(_port);
-    list_entry->PORT = _port;
-}
+    buffer_entry.PORT = _port;
 
-bool search_replies_list(uint16_t __hash, single_node_info* __list, single_node_info* __result) {
-    for (int i=0; i<10; i++) {
-        if (__list->ID == __hash) {
-            __result = __list;
-            return true;
-        }
-        __list = __list->list_link;
-    }
-    return false;
+    return buffer_entry;
 }
 
 /**
@@ -225,7 +254,7 @@ void send_reply(int conn, struct request *request) {
     uint16_t uri_hash = pseudo_hash((const unsigned char *)request->uri, strlen(request->uri));
     if (!is_node_responsible(atoi(this_node.PRED_ID), atoi(this_node.MY_ID), uri_hash)) { // check if other node is responsible
         single_node_info* node = NULL;
-        if (search_replies_list(uri_hash, saved_replies, node)) {
+        if (hash_in_buffer(reply_buffer, uri_hash, node)) {
             sprintf(reply, "HTTP/1.1 303 See Other\r\nLocation: http://%s:%hu%s\r\nContent-Length: 0\r\n\r\n",
             node->IP, node->PORT, request->uri);
             //HTTP/1.1 303 See Other
@@ -488,6 +517,12 @@ int main(int argc, char **argv) {
         {.fd = tcp_server_socket, .events = POLLIN},
         {.fd = udp_server_socket, .events = POLLIN},
     };
+    reply_buffer = malloc(sizeof(CircularBuffer));
+    if (!reply_buffer) {
+        perror("malloc failed");
+        exit(EXIT_FAILURE);
+    }
+    initBuffer(reply_buffer);
 
     struct connection_state state = {0};
     while (true) {
@@ -555,29 +590,8 @@ int main(int argc, char **argv) {
                         sendto(udp_server_socket, buffer, 11, 0, (struct sockaddr *)&succ_addr, sizeof(succ_addr));
                     }
                 } else if (flag==REPLY) {  // we have received a reply to one of our lookup requests, let's save it
-                    single_node_info* saving_loc;
-                    if (saved_replies==NULL){ // creates entry if linked list is empty
-                        saved_replies = malloc(sizeof(single_node_info));
-                        saved_replies->list_link=NULL;
-                        saving_loc = saved_replies;
-                    }
-                    else { // adds entry if linked list isn't empty
-                        for (int i=0; i<10; i++) {
-                            if (i==9){ // deletes oldest entry in linked list
-                                single_node_info* oldest_value = saved_replies;
-                                saved_replies = saved_replies->list_link;
-                                free(oldest_value);
-                            } 
-                            if (saving_loc->list_link==NULL) { // makes new entry in linked list
-                                saving_loc->list_link = malloc(sizeof(single_node_info));
-                                saving_loc = saving_loc->list_link;
-                                break;
-                            } else { // goes to next entry in linked list
-                                saving_loc = saving_loc->list_link;
-                            }
-                        }  
-                    }
-                    get_node_from_dht_message(buffer, saving_loc); // fills entry in linked list
+                    addItem(reply_buffer, get_node_from_dht_message(buffer));
+
                 } else {
                     fprintf(stderr, "Unknown DHT flag in internal UDP message: %d", flag);
                     continue;
@@ -598,6 +612,6 @@ int main(int argc, char **argv) {
             }
         }
     }
-
+    free(reply_buffer);
     return EXIT_SUCCESS;
 }
