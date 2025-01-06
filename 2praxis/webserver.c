@@ -5,11 +5,13 @@
 #include <netdb.h>
 #include <netinet/in.h>
 #include <poll.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/types.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "data.h"
@@ -45,6 +47,47 @@ typedef struct node_info {  // ID, IP and PORT are saved as char* because conver
     char* MY_PORT; 
     char* MY_ID;
 } node_info;
+
+typedef struct single_node_info { // used in a linked list to save the content of replies
+    char* IP; 
+    uint16_t PORT; 
+    uint16_t ID;
+    struct single_node_info* list_link;
+} single_node_info;
+
+single_node_info* saved_replies = NULL; // global variable
+
+void get_node_from_dht_message(char* message , single_node_info* list_entry) {
+    // at pos. 3-4: ip
+    uint16_t _id;
+    memcpy(&_id, message+3, sizeof(_id));
+    _id = ntohs(_id);
+    list_entry->ID = _id;
+
+    // at pos. 5-8: ip
+    uint32_t _ip_binary;
+    char _ip[INET_ADDRSTRLEN];
+    memcpy(&_ip_binary, message+5, sizeof(_ip_binary));
+    inet_ntop(AF_INET, &_ip_binary, _ip, sizeof(_ip));
+    list_entry->IP = _ip;
+
+    // at pos. 9-10: port
+    uint16_t _port;
+    memcpy(&_port, message+9, sizeof(_port));
+    _port = ntohs(_port);
+    list_entry->PORT = _port;
+}
+
+bool search_replies_list(uint16_t __hash, single_node_info* __list, single_node_info* __result) {
+    for (int i=0; i<10; i++) {
+        if (__list->ID == __hash) {
+            __result = __list;
+            return true;
+        }
+        __list = __list->list_link;
+    }
+    return false;
+}
 
 /**
  * Fills out a node_info struct which contains ID, IP and PORT of this node 
@@ -180,17 +223,27 @@ void send_reply(int conn, struct request *request) {
 
     // calculate hash of resource path
     uint16_t uri_hash = pseudo_hash((const unsigned char *)request->uri, strlen(request->uri));
-    if (uri_hash>atoi(this_node.MY_ID) && uri_hash<=atoi(this_node.PRED_ID)) { // check if other node is responsible and send simple lookup if so 
-        sprintf(reply, "HTTP/1.1 503 Service Unavailable\r\nRetry-After: 1\r\nContent-Length: 0\r\n\r\n");
-        //HTTP/1.1 503 Service Unavailable
-        //Retry-After: 1
-        //Content-Length: 0
-        offset = strlen(reply);
-        char* message_succ = dht_udp_message(LOOKUP, uri_hash, this_node.MY_ID, this_node.MY_IP, this_node.MY_PORT);
-        const struct sockaddr_in succ_addr = derive_sockaddr(this_node.SUCC_IP, this_node.SUCC_PORT);
-        sendto(udp_server_socket, message_succ, 11, 0, (struct sockaddr *)&succ_addr, sizeof(succ_addr));
-        free(message_succ);
-
+    if (!is_node_responsible(atoi(this_node.PRED_ID), atoi(this_node.MY_ID), uri_hash)) { // check if other node is responsible
+        single_node_info* node = NULL;
+        if (search_replies_list(uri_hash, saved_replies, node)) {
+            sprintf(reply, "HTTP/1.1 303 See Other\r\nLocation: http://%s:%hu%s\r\nContent-Length: 0\r\n\r\n",
+            node->IP, node->PORT, request->uri);
+            //HTTP/1.1 303 See Other
+            // Location: http://127.0.0.1:2017/path-with-unknown-hash
+            // Content-Length: 0
+            offset = strlen(reply);
+        }
+        else {
+            sprintf(reply, "HTTP/1.1 503 Service Unavailable\r\nRetry-After: 1\r\nContent-Length: 0\r\n\r\n");
+            //HTTP/1.1 503 Service Unavailable
+            //Retry-After: 1
+            //Content-Length: 0
+            offset = strlen(reply);
+            char* message_succ = dht_udp_message(LOOKUP, uri_hash, this_node.MY_ID, this_node.MY_IP, this_node.MY_PORT);
+            const struct sockaddr_in succ_addr = derive_sockaddr(this_node.SUCC_IP, this_node.SUCC_PORT);
+            sendto(udp_server_socket, message_succ, 11, 0, (struct sockaddr *)&succ_addr, sizeof(succ_addr));
+            free(message_succ);
+        }
     } else if (strcmp(request->method, "GET") == 0) { // if we reach this point this node is responsible for the request
         // Find the resource with the given URI in the 'resources' array.
         size_t resource_length;
@@ -477,30 +530,57 @@ int main(int argc, char **argv) {
             
             else if (s == udp_server_socket) {
                 // If the event is on the udp_server_socket
-                
                 char buffer[MSG_SIZE];
                 struct sockaddr_in client_addr;
                 socklen_t client_len = sizeof(client_addr);
-
                 ssize_t received = recvfrom(udp_server_socket, buffer, sizeof(buffer), 0, (struct sockaddr *)&client_addr, &client_len);
-
                 if (received<MSG_SIZE) {
                     fprintf(stderr, "Incomplete UDP message | received: %zd bytes | expected: %d bytes\n", received, MSG_SIZE);
                     continue;
                 }
-
-                uint16_t hash = (uint16_t)((buffer[1] << 8) | buffer[2]);
                 int flag = buffer[0];
-                //handle_lookup(&this_node, udp_server_socket, client_addr, hash, buffer, flag);
-                if (is_node_responsible(atoi(this_node.PRED_ID), atoi(this_node.MY_ID),hash)) {
-                    char* message = dht_udp_message(REPLY, atoi(this_node.PRED_ID), this_node.MY_ID, this_node.MY_IP, this_node.MY_PORT);
-                    sendto(udp_server_socket, message, 11, 0, (struct sockaddr *)&client_addr, client_len);
-                } else if (is_node_responsible(atoi(this_node.MY_ID), atoi(this_node.SUCC_ID),hash)) {
-                    char* message = dht_udp_message(REPLY, atoi(this_node.MY_ID), this_node.SUCC_ID, this_node.SUCC_IP, this_node.SUCC_PORT);
-                    sendto(udp_server_socket, message, 11, 0, (struct sockaddr *)&client_addr, client_len);
+                uint16_t hash = (uint16_t)((buffer[1] << 8) | buffer[2]);
+                if (flag==LOOKUP){ // we have received a lookup request from another node in the DHT, let's see what we can do
+                    // is this node responsible?
+                    if (is_node_responsible(atoi(this_node.PRED_ID), atoi(this_node.MY_ID),hash)) {
+                        char* message = dht_udp_message(REPLY, atoi(this_node.PRED_ID), this_node.MY_ID, this_node.MY_IP, this_node.MY_PORT);
+                        sendto(udp_server_socket, message, 11, 0, (struct sockaddr *)&client_addr, client_len);
+                    // is successor node responsible?
+                    } else if (is_node_responsible(atoi(this_node.MY_ID), atoi(this_node.SUCC_ID),hash)) {
+                        char* message = dht_udp_message(REPLY, atoi(this_node.MY_ID), this_node.SUCC_ID, this_node.SUCC_IP, this_node.SUCC_PORT);
+                        sendto(udp_server_socket, message, 11, 0, (struct sockaddr *)&client_addr, client_len);
+                    // we don't know who is responsible -> forward the lookup
+                    } else { 
+                        const struct sockaddr_in succ_addr = derive_sockaddr(this_node.SUCC_IP, this_node.SUCC_PORT);
+                        sendto(udp_server_socket, buffer, 11, 0, (struct sockaddr *)&succ_addr, sizeof(succ_addr));
+                    }
+                } else if (flag==REPLY) {  // we have received a reply to one of our lookup requests, let's save it
+                    single_node_info* saving_loc;
+                    if (saved_replies==NULL){ // creates entry if linked list is empty
+                        saved_replies = malloc(sizeof(single_node_info));
+                        saved_replies->list_link=NULL;
+                        saving_loc = saved_replies;
+                    }
+                    else { // adds entry if linked list isn't empty
+                        for (int i=0; i<10; i++) {
+                            if (i==9){ // deletes oldest entry in linked list
+                                single_node_info* oldest_value = saved_replies;
+                                saved_replies = saved_replies->list_link;
+                                free(oldest_value);
+                            } 
+                            if (saving_loc->list_link==NULL) { // makes new entry in linked list
+                                saving_loc->list_link = malloc(sizeof(single_node_info));
+                                saving_loc = saving_loc->list_link;
+                                break;
+                            } else { // goes to next entry in linked list
+                                saving_loc = saving_loc->list_link;
+                            }
+                        }  
+                    }
+                    get_node_from_dht_message(buffer, saving_loc); // fills entry in linked list
                 } else {
-                    const struct sockaddr_in succ_addr = derive_sockaddr(this_node.SUCC_IP, this_node.SUCC_PORT);
-                    sendto(udp_server_socket, buffer, 11, 0, (struct sockaddr *)&succ_addr, sizeof(succ_addr));
+                    fprintf(stderr, "Unknown DHT flag in internal UDP message: %d", flag);
+                    continue;
                 }
             }
             
