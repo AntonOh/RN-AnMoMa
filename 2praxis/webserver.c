@@ -17,9 +17,14 @@
 #include "util.h"
 
 #define MAX_RESOURCES 100
+#define PRED 400
+#define SELF 500
+#define SUCC 600
+
+#define MSG_SIZE 11
+
 #define LOOKUP 0
 #define REPLY 1
-
 int udp_server_socket; // global variable which is filled in main() and used in send_reply()
 
 struct node_info this_node; // global variable that has it's values assigned by calling fill_out_node_info in main()
@@ -472,33 +477,31 @@ int main(int argc, char **argv) {
             
             else if (s == udp_server_socket) {
                 // If the event is on the udp_server_socket
-                char* _buff = calloc(11, sizeof(char));
+                
+                char buffer[MSG_SIZE];
                 struct sockaddr_in client_addr;
                 socklen_t client_len = sizeof(client_addr);
-                
-                recvfrom(s, _buff, 11, 0, (struct sockaddr *)&client_addr, &client_len);
-                
-                uint16_t _hash;
-                memcpy(&_hash, _buff+1, sizeof(_hash)); 
-                
-                if (is_node_responsible(atoi(this_node.MY_ID), atoi(this_node.SUCC_ID),_hash)) { // check whether successor node is responsible
-                    char* message_succ = dht_udp_message(REPLY, // successor responsible
-                    atoi(this_node.MY_ID), this_node.SUCC_ID, this_node.SUCC_IP, this_node.SUCC_PORT);
-                    
-                    sendto(udp_server_socket, message_succ, 11, 0, (struct sockaddr *)&client_addr, client_len);
 
-                } else if (is_node_responsible(atoi(this_node.PRED_ID), atoi(this_node.MY_ID), _hash)) { // check if this node is responsible
-                    char* message_succ = dht_udp_message(REPLY, // I am responsible
-                    atoi(this_node.PRED_ID), this_node.MY_ID, this_node.MY_IP, this_node.MY_PORT);
-                    
-                    sendto(udp_server_socket, message_succ, 11, 0, (struct sockaddr *)&client_addr, client_len);
+                ssize_t received = recvfrom(udp_server_socket, buffer, sizeof(buffer), 0, (struct sockaddr *)&client_addr, &client_len);
 
-                } else { // forwards the message
-                    const struct sockaddr_in succ_addr = derive_sockaddr(this_node.SUCC_IP, this_node.SUCC_PORT);
-                    sendto(udp_server_socket, _buff, 11, 0, (struct sockaddr *)&succ_addr, sizeof(succ_addr));
+                if (received<MSG_SIZE) {
+                    fprintf(stderr, "Incomplete UDP message | received: %zd bytes | expected: %d bytes\n", received, MSG_SIZE);
+                    continue;
                 }
-                
-                free(_buff);
+
+                uint16_t hash = (uint16_t)((buffer[1] << 8) | buffer[2]);
+                int flag = buffer[0];
+                //handle_lookup(&this_node, udp_server_socket, client_addr, hash, buffer, flag);
+                if (is_node_responsible(atoi(this_node.PRED_ID), atoi(this_node.MY_ID),hash)) {
+                    char* message = dht_udp_message(REPLY, atoi(this_node.PRED_ID), this_node.MY_ID, this_node.MY_IP, this_node.MY_PORT);
+                    sendto(udp_server_socket, message, 11, 0, (struct sockaddr *)&client_addr, client_len);
+                } else if (is_node_responsible(atoi(this_node.MY_ID), atoi(this_node.SUCC_ID),hash)) {
+                    char* message = dht_udp_message(REPLY, atoi(this_node.MY_ID), this_node.SUCC_ID, this_node.SUCC_IP, this_node.SUCC_PORT);
+                    sendto(udp_server_socket, message, 11, 0, (struct sockaddr *)&client_addr, client_len);
+                } else {
+                    const struct sockaddr_in succ_addr = derive_sockaddr(this_node.SUCC_IP, this_node.SUCC_PORT);
+                    sendto(udp_server_socket, buffer, 11, 0, (struct sockaddr *)&succ_addr, sizeof(succ_addr));
+                }
             }
             
             else {
