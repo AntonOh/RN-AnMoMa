@@ -51,11 +51,13 @@ typedef struct node_info {  // ID, IP and PORT are saved as char* because conver
     char* MY_ID;
 } node_info;
 
-typedef struct single_node_info { // used in a linked list to save the content of replies
-    char* IP; 
+typedef struct single_node_info { // used to save the content of replies
+    char IP[INET_ADDRSTRLEN]; 
     uint16_t PORT; 
     uint16_t ID;
 } single_node_info;
+
+single_node_info single_reply = {NULL, 0, 0};
 
 typedef struct {
     single_node_info buffer[BUFFER_SIZE];
@@ -81,7 +83,6 @@ void addItem(CircularBuffer *cb, single_node_info item) {
 }
 
 bool hash_in_buffer(CircularBuffer *cb, uint16_t __hash, single_node_info* __result) {
-    printf("Buffer: ");
     for (int i = 0; i < cb->count; i++) {
         int index = (cb->start + i) % BUFFER_SIZE;
         if (cb->buffer[index].ID == __hash) {
@@ -96,7 +97,7 @@ CircularBuffer* reply_buffer; // global variable
 
 single_node_info get_node_from_dht_message(char* message) {
     single_node_info buffer_entry;
-    // at pos. 3-4: ip
+    // at pos. 3-4: id
     uint16_t _id;
     memcpy(&_id, message+3, sizeof(_id));
     _id = ntohs(_id);
@@ -104,10 +105,8 @@ single_node_info get_node_from_dht_message(char* message) {
 
     // at pos. 5-8: ip
     uint32_t _ip_binary;
-    char _ip[INET_ADDRSTRLEN];
     memcpy(&_ip_binary, message+5, sizeof(_ip_binary));
-    inet_ntop(AF_INET, &_ip_binary, _ip, sizeof(_ip));
-    buffer_entry.IP = _ip;
+    inet_ntop(AF_INET, &_ip_binary, buffer_entry.IP, INET_ADDRSTRLEN);
 
     // at pos. 9-10: port
     uint16_t _port;
@@ -241,7 +240,6 @@ static struct sockaddr_in derive_sockaddr(const char *host, const char *port) {
  * information.
  */
 void send_reply(int conn, struct request *request) {
-
     // Create a buffer to hold the HTTP reply
     char buffer[HTTP_MAX_SIZE];
     char *reply = buffer;
@@ -252,17 +250,20 @@ void send_reply(int conn, struct request *request) {
 
     // calculate hash of resource path
     uint16_t uri_hash = pseudo_hash((const unsigned char *)request->uri, strlen(request->uri));
+    printf("\nrequested uri hash %hu\n", uri_hash);
     if (!is_node_responsible(atoi(this_node.PRED_ID), atoi(this_node.MY_ID), uri_hash)) { // check if other node is responsible
         single_node_info* node = NULL;
-        if (hash_in_buffer(reply_buffer, uri_hash, node)) {
+        printf("\nuri_hash: %hu single_reply: id: %hu port: %hu ip: %s\n", uri_hash, single_reply.ID, single_reply.PORT, single_reply.IP);
+        if (single_reply.ID!=0) {
             sprintf(reply, "HTTP/1.1 303 See Other\r\nLocation: http://%s:%hu%s\r\nContent-Length: 0\r\n\r\n",
-            node->IP, node->PORT, request->uri);
+            single_reply.IP, single_reply.PORT, request->uri);
             //HTTP/1.1 303 See Other
             // Location: http://127.0.0.1:2017/path-with-unknown-hash
             // Content-Length: 0
             offset = strlen(reply);
         }
         else {
+            //printf("\nsingle_repy: %hu shouldn't be equal to hash: %hu", single_reply.ID, uri_hash);
             sprintf(reply, "HTTP/1.1 503 Service Unavailable\r\nRetry-After: 1\r\nContent-Length: 0\r\n\r\n");
             //HTTP/1.1 503 Service Unavailable
             //Retry-After: 1
@@ -590,8 +591,10 @@ int main(int argc, char **argv) {
                         sendto(udp_server_socket, buffer, 11, 0, (struct sockaddr *)&succ_addr, sizeof(succ_addr));
                     }
                 } else if (flag==REPLY) {  // we have received a reply to one of our lookup requests, let's save it
+                    printf("\nreceived reply\n");
+                    single_reply = get_node_from_dht_message(buffer);
                     addItem(reply_buffer, get_node_from_dht_message(buffer));
-
+                    printf("reply id: %hu\n", single_reply.ID);
                 } else {
                     fprintf(stderr, "Unknown DHT flag in internal UDP message: %d", flag);
                     continue;
