@@ -34,9 +34,55 @@ typedef struct {
     const char *successor_ip;
     int predecessor_port;
     int successor_port;
+    const char *self_ip;
+    int self_port;
 } NodeConfig;
 
 NodeConfig config;
+int udp_socket;
+
+void send_lookup_request(uint16_t hash, int udp_socket) {
+    // Nachrichtenformat: '!BHH4sH'
+    uint8_t message_type = 0; // Message Type: Lookup
+    uint16_t network_hash = htons(hash);
+    uint16_t network_node_id = htons(config.node_id);
+    uint32_t network_self_ip; // Binäre IP-Adresse (4 Bytes)
+    uint16_t network_self_port = htons(config.self_port);
+
+    // Konvertiere eigene IP-Adresse zu binärem Format
+    if (inet_pton(AF_INET, config.self_ip, &network_self_ip) != 1) {
+        perror("Fehler bei der Umwandlung der eigenen IP-Adresse");
+        return;
+    }
+
+    // Nachricht erstellen
+    uint8_t buffer[11];
+    memset(buffer, 0, sizeof(buffer));
+    buffer[0] = message_type;
+    memcpy(buffer + 1, &network_hash, sizeof(network_hash));
+    memcpy(buffer + 3, &network_node_id, sizeof(network_node_id));
+    memcpy(buffer + 5, &network_self_ip, sizeof(network_self_ip));
+    memcpy(buffer + 9, &network_self_port, sizeof(network_self_port));
+
+    // Zieladresse für den Nachfolger vorbereiten
+    struct sockaddr_in successor_addr = {0};
+    successor_addr.sin_family = AF_INET;
+    successor_addr.sin_port = htons(config.successor_port);
+    if (inet_pton(AF_INET, config.successor_ip, &successor_addr.sin_addr) != 1) {
+        perror("Fehler bei der Umwandlung der Nachfolger-IP-Adresse");
+        return;
+    }
+
+    // Nachricht senden
+    ssize_t sent_bytes = sendto(udp_socket, buffer, sizeof(buffer), 0, 
+                                (struct sockaddr *)&successor_addr, sizeof(successor_addr));
+    if (sent_bytes == -1) {
+        perror("Fehler beim Senden der Lookup-Nachricht");
+    } else if (sent_bytes != sizeof(buffer)) {
+        fprintf(stderr, "Warnung: Nur %zd von %zu Bytes gesendet\n", sent_bytes, sizeof(buffer));
+    }
+}
+
 
 int correct_node(uint16_t hash, uint16_t node_id, uint16_t predecessor_id) {
     fprintf(stderr, "DEBUG: Entering correct_node\n");
@@ -59,35 +105,60 @@ int correct_node(uint16_t hash, uint16_t node_id, uint16_t predecessor_id) {
 }
 
 void send_lookup(char *buffer, size_t length, struct sockaddr_in *client_addr, int udp_socket) {
-    
-    fprintf(stderr, "DEBUG: Empfangene Nachricht von %s:%d mit Inhalt: %s\n", 
-            inet_ntoa(client_addr->sin_addr), ntohs(client_addr->sin_port), buffer);
-
     uint16_t hash;
-    sscanf(buffer, "LOOKUP %hu", &hash);
-    fprintf(stderr, "DEBUG: Extrahierter Hash-Wert: %u\n", hash);
+    memcpy(&hash, buffer + 1, sizeof(hash));  // Extrair hash da mensagem
+    hash = ntohs(hash);  // Converter para host byte order
 
+    fprintf(stderr, "DEBUG: Empfangene Nachricht von %s:%d für Hash %u\n", 
+            inet_ntoa(client_addr->sin_addr), ntohs(client_addr->sin_port), hash);
+
+    // Verificar se a Node atual é responsável
     if (correct_node(hash, config.node_id, config.predecessor_id)) {
-        
-        fprintf(stderr, "DEBUG: Dieser Node ist verantwortlich für Hash %u\n", hash);
-        
-        char response[1024];
+        // A Node atual é responsável: envie uma resposta Reply
+        uint8_t reply[11];
+        reply[0] = 1;  // Message Type: Reply
+        uint16_t pred_id = htons(config.predecessor_id);
+        memcpy(reply + 1, &pred_id, sizeof(pred_id));
+        uint16_t node_id = htons(config.node_id);
+        memcpy(reply + 3, &node_id, sizeof(node_id));
+        uint32_t self_ip;
+        inet_pton(AF_INET, config.self_ip, &self_ip);
+        memcpy(reply + 5, &self_ip, sizeof(self_ip));
+        uint16_t self_port = htons(config.self_port);
+        memcpy(reply + 9, &self_port, sizeof(self_port));
 
-        snprintf(response, sizeof(response), "Node %d ist verantwortlich für Hash %u\n", config.node_id, hash);
-        sendto(udp_socket, response, strlen(response), 0, (struct sockaddr *)client_addr, sizeof(*client_addr));
-        fprintf(stderr, "DEBUG: Antwort gesendet: %s\n", response);
+        sendto(udp_socket, reply, sizeof(reply), 0, (struct sockaddr *)client_addr, sizeof(*client_addr));
+        fprintf(stderr, "DEBUG: Reply gesendet für Hash %u\n", hash);
+    } else if (correct_node(hash, config.successor_id, config.node_id)) {
+        // Sucessora é responsável: envie uma resposta Reply com dados da sucessora
+        uint8_t reply[11];
+        reply[0] = 1;  // Message Type: Reply
+        uint16_t node_id = htons(config.node_id);
+        memcpy(reply + 1, &node_id, sizeof(node_id));
+        uint16_t succ_id = htons(config.successor_id);
+        memcpy(reply + 3, &succ_id, sizeof(succ_id));
+        uint32_t succ_ip;
+        inet_pton(AF_INET, config.successor_ip, &succ_ip);
+        memcpy(reply + 5, &succ_ip, sizeof(succ_ip));
+        uint16_t succ_port = htons(config.successor_port);
+        memcpy(reply + 9, &succ_port, sizeof(succ_port));
+
+        sendto(udp_socket, reply, sizeof(reply), 0, (struct sockaddr *)client_addr, sizeof(*client_addr));
+        fprintf(stderr, "DEBUG: Reply gesendet für Hash %u (verantwortlich: Sucessor)\n", hash);
     } else {
+        // Encaminhar Lookup para o sucessor
         fprintf(stderr, "DEBUG: Weiterleitung der Lookup-Anfrage an Nachfolger\n");
 
         struct sockaddr_in successor_addr;
         successor_addr.sin_family = AF_INET;
         successor_addr.sin_port = htons(config.successor_port);
-        inet_aton(config.successor_ip, &successor_addr.sin_addr);
+        inet_pton(AF_INET, config.successor_ip, &successor_addr.sin_addr);
 
         sendto(udp_socket, buffer, length, 0, (struct sockaddr *)&successor_addr, sizeof(successor_addr));
-        fprintf(stderr, "DEBUG: Nachricht weitergeleitet an %s:%d\n", config.successor_ip, config.successor_port);
+        fprintf(stderr, "DEBUG: Lookup weitergeleitet an %s:%d\n", config.successor_ip, config.successor_port);
     }
 }
+
 //LULA ENDET
 
 
@@ -106,27 +177,32 @@ void send_reply(int conn, struct request *request) {
     char *reply = buffer;
     size_t offset = 0;
 
-    fprintf(stderr, "Handling %s request for %s (%lu byte payload)\n",
-            request->method, request->uri, request->payload_length);
+    fprintf(stderr, "Handling %s request for %s (%lu byte payload)\n", request->method, request->uri, request->payload_length);
     
     //LULA BEGINNT
     uint16_t hash = pseudo_hash((const unsigned char *)request->uri, strlen(request->uri));
-    fprintf(stderr, "DEBUG: Hash for resource '%s'= %u\n", request->uri, hash);
-    fprintf(stderr, "DEBUG: Hash = %u\n", hash);
+
+    size_t resource_length = 0;
+    const char *resource = NULL;
+
+    fprintf(stderr, "DEBUG: Hash for resource '%s' = %u\n", request->uri, hash);
     fprintf(stderr, "DEBUG: Node ID = %u\n", config.node_id);
     fprintf(stderr, "DEBUG: Predecessor ID = %u\n", config.predecessor_id);
 
-
     if (correct_node(hash, config.node_id, config.predecessor_id) == 0) {
+        // Node ist nicht verantwortlich
         fprintf(stderr, "Node %u is NOT responsible for resource '%s'.\n", config.node_id, request->uri);
-        offset = sprintf(reply, "HTTP/1.1 303 See Other\r\nLocation: http://%s:%d%s\r\n"
-                        "Content-Length: 0\r\n\r\n", config.successor_ip, config.successor_port, request->uri);
-    //LULA ENDET
-    } else if (strcmp(request->method, "GET") == 0) {
-        size_t resource_length;
-        const char *resource =
-            get(request->uri, resources, MAX_RESOURCES, &resource_length);
 
+        send_lookup_request(hash, udp_socket);
+
+        // 503-Antwort an den Client senden
+        offset = sprintf(reply, "HTTP/1.1 503 Service Unavailable\r\nRetry-After: 1\r\nContent-Length: 0\r\n\r\n");
+        send(conn, reply, offset, 0);
+        return;
+    }
+
+    if (strcmp(request->method, "GET") == 0) {
+        resource = get(request->uri, resources, MAX_RESOURCES, &resource_length);
         if (resource) {
             size_t payload_offset =
                 sprintf(reply, "HTTP/1.1 200 OK\r\nContent-Length: %lu\r\n\r\n", resource_length);
@@ -319,7 +395,7 @@ static struct sockaddr_in derive_sockaddr(const char *host, const char *port) {
 
 //LULA BEGINNT
 static int setup_udp_socket(struct sockaddr_in addr) {
-    int udp_socket = socket(AF_INET, SOCK_DGRAM, 0);
+    udp_socket = socket(AF_INET, SOCK_DGRAM, 0);
     const int disable = 0;
 
     if (udp_socket == -1) {
@@ -414,13 +490,13 @@ int main(int argc, char **argv) {
 
     memset(&config, 0, sizeof(config));
 
-    const char *ip = argv[1];
-    const char *port = argv[2];
+    config.self_ip = argv[1];
+    config.self_port = atoi(argv[2]);
 
-    struct sockaddr_in addr = derive_sockaddr(ip, port);
+    struct sockaddr_in addr = derive_sockaddr(config.self_ip, argv[2]);
 
-    int udp_socket = setup_udp_socket(addr);
-    printf("UDP-Socket läuft auf %s:%s\n", ip, port);
+    udp_socket = setup_udp_socket(addr);
+    printf("UDP-Socket läuft auf %s:%s\n", config.self_ip, argv[2]);
 
     int server_socket = setup_server_socket(addr);
 
@@ -544,4 +620,4 @@ int main(int argc, char **argv) {
     return EXIT_SUCCESS;
 }
 
-//10 passed
+//12 passed
