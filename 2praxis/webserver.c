@@ -58,8 +58,6 @@ typedef struct single_node_info { // used to save the content of replies
     uint16_t PORT;   
 } single_node_info;
 
-single_node_info single_reply = {6000, 6001, };
-
 typedef struct {
     single_node_info buffer[BUFFER_SIZE];
     int start;  // Index of the oldest item
@@ -256,9 +254,8 @@ void send_reply(int conn, struct request *request) {
 
     // calculate hash of resource path
     uint16_t uri_hash = pseudo_hash((const unsigned char *)request->uri, strlen(request->uri));
-    printf("\nrequested uri hash %hu\n", uri_hash);
+    printf("\nat node: %hu requested uri_hash %hu\n", atoi(this_node.MY_ID), uri_hash);
     if (!is_node_responsible(atoi(this_node.PRED_ID), atoi(this_node.MY_ID), uri_hash)) { // check if other node is responsible
-        printf("\nuri_hash: %hu single_reply: pred_id: %hu id: %hu port: %hu ip: %s\n", uri_hash, single_reply.PRED_ID, single_reply.ID, single_reply.PORT, single_reply.IP);
         single_node_info* node = hash_in_buffer(reply_buffer, uri_hash);
         if (node != NULL) {
             sprintf(reply, "HTTP/1.1 303 See Other\r\nLocation: http://%s:%hu%s\r\nContent-Length: 0\r\n\r\n",
@@ -269,7 +266,6 @@ void send_reply(int conn, struct request *request) {
             offset = strlen(reply);
         }
         else {
-            //printf("\nsingle_repy: %hu shouldn't be equal to hash: %hu", single_reply.ID, uri_hash);
             sprintf(reply, "HTTP/1.1 503 Service Unavailable\r\nRetry-After: 1\r\nContent-Length: 0\r\n\r\n");
             //HTTP/1.1 503 Service Unavailable
             //Retry-After: 1
@@ -581,26 +577,31 @@ int main(int argc, char **argv) {
                     continue;
                 }
                 int flag = buffer[0];
-                uint16_t hash = (uint16_t)((buffer[1] << 8) | buffer[2]);
+                single_node_info info = get_node_from_dht_message(buffer);
                 if (flag==LOOKUP){ // we have received a lookup request from another node in the DHT, let's see what we can do
                     // is this node responsible?
+                    uint16_t hash = info.PRED_ID;
+                    char port[4];
+                    sprintf(port, "%hu", info.PORT);
+                    printf("Lookup from Port %s",port);
                     if (is_node_responsible(atoi(this_node.PRED_ID), atoi(this_node.MY_ID),hash)) {
                         char* message = dht_udp_message(REPLY, atoi(this_node.PRED_ID), this_node.MY_ID, this_node.MY_IP, this_node.MY_PORT);
-                        sendto(udp_server_socket, message, 11, 0, (struct sockaddr *)&client_addr, client_len);
+                        const struct sockaddr_in lookup_orign = derive_sockaddr(info.IP, port);
+                        sendto(udp_server_socket, message, 11, 0, (struct sockaddr *)&lookup_orign, sizeof(lookup_orign));
                     // is successor node responsible?
                     } else if (is_node_responsible(atoi(this_node.MY_ID), atoi(this_node.SUCC_ID),hash)) {
                         char* message = dht_udp_message(REPLY, atoi(this_node.MY_ID), this_node.SUCC_ID, this_node.SUCC_IP, this_node.SUCC_PORT);
-                        sendto(udp_server_socket, message, 11, 0, (struct sockaddr *)&client_addr, client_len);
+                        const struct sockaddr_in lookup_orign = derive_sockaddr(info.IP, port);
+                        sendto(udp_server_socket, message, 11, 0, (struct sockaddr *)&lookup_orign, sizeof(lookup_orign));
                     // we don't know who is responsible -> forward the lookup
                     } else { 
                         const struct sockaddr_in succ_addr = derive_sockaddr(this_node.SUCC_IP, this_node.SUCC_PORT);
                         sendto(udp_server_socket, buffer, 11, 0, (struct sockaddr *)&succ_addr, sizeof(succ_addr));
                     }
                 } else if (flag==REPLY) {  // we have received a reply to one of our lookup requests, let's save it
-                    printf("\nreceived reply\n");
-                    single_reply = get_node_from_dht_message(buffer);
-                    addItem(reply_buffer, get_node_from_dht_message(buffer));
-                    printf("reply id: %hu\n", single_reply.ID);
+                    
+                    printf("\nat node: %hu received reply PRED_ID: %hu, ID: %hu, IP: %s, PORT: %hu\n",atoi(this_node.MY_ID), info.PRED_ID, info.ID, info.IP, info.PORT);
+                    addItem(reply_buffer, info);
                 } else {
                     fprintf(stderr, "Unknown DHT flag in internal UDP message: %d", flag);
                     continue;
