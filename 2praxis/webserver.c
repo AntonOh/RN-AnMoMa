@@ -66,6 +66,25 @@ typedef struct {
     int count;  // Number of items in the buffer
 } CircularBuffer;
 
+/**
+ * Answers if __node_in_question is responsible for the resource with the hash id __hash
+ *
+ * @param __node_in_question is the node we are asking the responsibility question for
+ * @param __predecessor_node is the predecessor node of __node_in_question
+ * @param __hash_id is the hash id of the resource __node_in_question might be responsible for
+ *
+ * @return True if __node_in_question is responsible, False if it isn't
+ */
+bool is_node_responsible(uint16_t __predecessor_node, uint16_t __node_in_question, uint16_t __hash_id) {
+    if (__predecessor_node < __node_in_question) {
+        // Case 1: __predecessor_node and __node_in_question are in the normal range
+        return (__hash_id > __predecessor_node && __hash_id <= __node_in_question);
+    } else {
+        // Case 2: __node_in_question wraps around to the beginning of the ring
+        return (__hash_id > __predecessor_node || __hash_id <= __node_in_question);
+    }
+}
+
 void initBuffer(CircularBuffer *cb) {
     cb->start = 0;
     cb->count = 0;
@@ -83,15 +102,14 @@ void addItem(CircularBuffer *cb, single_node_info item) {
     }
 }
 
-bool hash_in_buffer(CircularBuffer *cb, uint16_t __hash, single_node_info* __result) {
+single_node_info* hash_in_buffer(CircularBuffer *cb, uint16_t __hash) {
     for (int i = 0; i < cb->count; i++) {
         int index = (cb->start + i) % BUFFER_SIZE;
-        if (cb->buffer[index].ID == __hash) {
-            __result = &cb->buffer[index];
-            return true;
+        if (is_node_responsible(cb->buffer[index].PRED_ID, cb->buffer[index].ID, __hash)) {
+            return &cb->buffer[index];
         }
     }
-    return false;
+    return NULL;
 }
 
 CircularBuffer* reply_buffer; // global variable
@@ -189,25 +207,6 @@ char* dht_udp_message(u_int8_t __message_type, u_int16_t __uri_hash, char* __id,
 }
 
 /**
- * Answers if __node_in_question is responsible for the resource with the hash id __hash
- *
- * @param __node_in_question is the node we are asking the responsibility question for
- * @param __predecessor_node is the predecessor node of __node_in_question
- * @param __hash_id is the hash id of the resource __node_in_question might be responsible for
- *
- * @return True if __node_in_question is responsible, False if it isn't
- */
-bool is_node_responsible(uint16_t __predecessor_node, uint16_t __node_in_question, uint16_t __hash_id) {
-    if (__predecessor_node < __node_in_question) {
-        // Case 1: __predecessor_node and __node_in_question are in the normal range
-        return (__hash_id > __predecessor_node && __hash_id <= __node_in_question);
-    } else {
-        // Case 2: __node_in_question wraps around to the beginning of the ring
-        return (__hash_id > __predecessor_node || __hash_id <= __node_in_question);
-    }
-}
-
-/**
  * Derives a sockaddr_in structure from the provided host and port information.
  *
  * @param host The host (IP address or hostname) to be resolved into a network
@@ -259,11 +258,11 @@ void send_reply(int conn, struct request *request) {
     uint16_t uri_hash = pseudo_hash((const unsigned char *)request->uri, strlen(request->uri));
     printf("\nrequested uri hash %hu\n", uri_hash);
     if (!is_node_responsible(atoi(this_node.PRED_ID), atoi(this_node.MY_ID), uri_hash)) { // check if other node is responsible
-        single_node_info* node = NULL;
         printf("\nuri_hash: %hu single_reply: pred_id: %hu id: %hu port: %hu ip: %s\n", uri_hash, single_reply.PRED_ID, single_reply.ID, single_reply.PORT, single_reply.IP);
-        if (is_node_responsible(single_reply.PRED_ID, single_reply.ID, uri_hash)) {
+        single_node_info* node = hash_in_buffer(reply_buffer, uri_hash);
+        if (node != NULL) {
             sprintf(reply, "HTTP/1.1 303 See Other\r\nLocation: http://%s:%hu%s\r\nContent-Length: 0\r\n\r\n",
-            single_reply.IP, single_reply.PORT, request->uri);
+            node->IP, node->PORT, request->uri);
             //HTTP/1.1 303 See Other
             // Location: http://127.0.0.1:2017/path-with-unknown-hash
             // Content-Length: 0
