@@ -52,12 +52,13 @@ typedef struct node_info {  // ID, IP and PORT are saved as char* because conver
 } node_info;
 
 typedef struct single_node_info { // used to save the content of replies
-    char IP[INET_ADDRSTRLEN]; 
-    uint16_t PORT; 
+    uint16_t PRED_ID;
     uint16_t ID;
+    char IP[INET_ADDRSTRLEN]; 
+    uint16_t PORT;   
 } single_node_info;
 
-single_node_info single_reply = {NULL, 0, 0};
+single_node_info single_reply = {6000, 6001, };
 
 typedef struct {
     single_node_info buffer[BUFFER_SIZE];
@@ -97,6 +98,12 @@ CircularBuffer* reply_buffer; // global variable
 
 single_node_info get_node_from_dht_message(char* message) {
     single_node_info buffer_entry;
+    // at pos. 1-2: id
+    uint16_t pred_id;
+    memcpy(&pred_id, message+1, sizeof(pred_id));
+    pred_id = ntohs(pred_id);
+    buffer_entry.PRED_ID = pred_id;
+    
     // at pos. 3-4: id
     uint16_t _id;
     memcpy(&_id, message+3, sizeof(_id));
@@ -253,8 +260,8 @@ void send_reply(int conn, struct request *request) {
     printf("\nrequested uri hash %hu\n", uri_hash);
     if (!is_node_responsible(atoi(this_node.PRED_ID), atoi(this_node.MY_ID), uri_hash)) { // check if other node is responsible
         single_node_info* node = NULL;
-        printf("\nuri_hash: %hu single_reply: id: %hu port: %hu ip: %s\n", uri_hash, single_reply.ID, single_reply.PORT, single_reply.IP);
-        if (single_reply.ID!=0) {
+        printf("\nuri_hash: %hu single_reply: pred_id: %hu id: %hu port: %hu ip: %s\n", uri_hash, single_reply.PRED_ID, single_reply.ID, single_reply.PORT, single_reply.IP);
+        if (is_node_responsible(single_reply.PRED_ID, single_reply.ID, uri_hash)) {
             sprintf(reply, "HTTP/1.1 303 See Other\r\nLocation: http://%s:%hu%s\r\nContent-Length: 0\r\n\r\n",
             single_reply.IP, single_reply.PORT, request->uri);
             //HTTP/1.1 303 See Other
