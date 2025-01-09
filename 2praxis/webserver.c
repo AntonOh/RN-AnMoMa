@@ -30,10 +30,6 @@
 
 #define BUFFER_SIZE 10
 
-int udp_server_socket; // global variable which is filled in main() and used in send_reply()
-
-struct node_info this_node; // global variable that has it's values assigned by calling fill_out_node_info in main()
-
 struct tuple resources[MAX_RESOURCES] = { // defines resources of our dht
     {"/static/foo", "Foo", sizeof "Foo" - 1},
     {"/static/bar", "Bar", sizeof "Bar" - 1},
@@ -63,6 +59,12 @@ typedef struct {
     int start;  // Index of the oldest item
     int count;  // Number of items in the buffer
 } CircularBuffer;
+
+int udp_server_socket; // global variable which is filled in main() and used in send_reply()
+
+struct node_info this_node; // global variable that has it's values assigned by calling fill_out_node_info in main()
+
+CircularBuffer* reply_buffer; // global variable which is initialised in main()
 
 /**
  * Answers if __node_in_question is responsible for the resource with the hash id __hash
@@ -109,8 +111,6 @@ single_node_info* hash_in_buffer(CircularBuffer *cb, uint16_t __hash) {
     }
     return NULL;
 }
-
-CircularBuffer* reply_buffer; // global variable
 
 single_node_info get_node_from_dht_message(char* message) {
     single_node_info buffer_entry;
@@ -181,7 +181,6 @@ char* dht_udp_message(u_int8_t __message_type, u_int16_t __uri_hash, char* __id,
     char* message = calloc(11, sizeof(char));
 
     // at pos. 0: type of the message, either LOOKUP(=0) or REPLY(=1)
-    uint8_t _nbo_type = htons(__message_type); // hton here fails test_lookup_reply // delete this later?
     memcpy(message, &__message_type, sizeof(__message_type));
 
     // at pos. 1-2: hash value of the resource this message is about
@@ -513,7 +512,7 @@ int main(int argc, char **argv) {
 
     // gathers info from call looking like this: 
     // PRED_ID=16384 PRED_IP=127.0.0.1 PRED_PORT=2001 SUCC_ID=16384 SUCC_IP=127.0.0.1 SUCC_PORT=2001 ./build/webserver 127.0.0.1 2002 49152
-    this_node = fill_out_node_info(argv[3], argv[1], argv[2]); //I am not converting the numbers from char* to int since this breaks the first test?
+    this_node = fill_out_node_info(argv[3], argv[1], argv[2]); //I am not converting the numbers from char* to int since this breaks the first test???
 
     // Create an array of pollfd structures to monitor sockets.
     struct pollfd sockets[3] = {
@@ -599,7 +598,6 @@ int main(int argc, char **argv) {
                         sendto(udp_server_socket, buffer, 11, 0, (struct sockaddr *)&succ_addr, sizeof(succ_addr));
                     }
                 } else if (flag==REPLY) {  // we have received a reply to one of our lookup requests, let's save it
-                    
                     printf("\nat node: %hu received reply PRED_ID: %hu, ID: %hu, IP: %s, PORT: %hu\n",atoi(this_node.MY_ID), info.PRED_ID, info.ID, info.IP, info.PORT);
                     addItem(reply_buffer, info);
                 } else {
